@@ -1,0 +1,297 @@
+<Window x:Class="RecentDock.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:RecentDock.App"
+        Title="RecentDock" Height="560" Width="720"
+        MinHeight="240" MinWidth="480"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        Background="Transparent"
+        Foreground="{StaticResource PrimaryTextBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI"
+        FontSize="13"
+        TextOptions.TextFormattingMode="Display"
+        UseLayoutRounding="True">
+
+  <!--
+    This window is chrome-less, and deliberately NOT using either of the two obvious
+    ways to get a translucent panel:
+
+      * AllowsTransparency="True" forces WPF onto a software rendering path (frames
+        drop on a long list) and makes WPF compose the window itself, which stops the
+        DWM material from showing through.
+      * WindowChrome made the client area opaque via GlassFrameThickness, so the
+        DWM backdrop was painted behind an opaque surface and never visible.
+
+    Instead: WindowStyle="None" with a transparent window background, so the DWM
+    paints its acrylic material behind the client area. Resizing and dragging are
+    supplied by WindowResizer via WM_NCHITTEST, and the rounded corners come from
+    DWM. The panels below are translucent so the material reads through them.
+
+    On Windows 10, where the backdrop attribute does not exist, these panels alone
+    provide the appearance: dimmer, still correct.
+  -->
+
+  <!-- Outer frame: 1px hairline plus a soft shadow to lift the panel off the
+       desktop. The fill is intentionally faint so the backdrop dominates. -->
+  <Border BorderBrush="{StaticResource GlassBorderBrush}"
+          BorderThickness="1"
+          CornerRadius="8"
+          Background="{StaticResource GlassTintBrush}">
+    <Border.Effect>
+      <DropShadowEffect BlurRadius="18" ShadowDepth="0" Opacity="0.45" Color="#000000" />
+    </Border.Effect>
+
+    <Grid>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />   <!-- header -->
+        <RowDefinition Height="Auto" />   <!-- notice strip -->
+        <RowDefinition Height="*" />      <!-- list + empty state -->
+        <RowDefinition Height="Auto" />   <!-- status bar -->
+      </Grid.RowDefinitions>
+
+      <!-- ============================ header, doubles as the drag handle -->
+      <Border Grid.Row="0"
+              Background="{StaticResource GlassHeaderBrush}"
+              CornerRadius="7,7,0,0"
+              MouseLeftButtonDown="OnDragAreaMouseLeftButtonDown">
+        <Grid Margin="12,8,8,8">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+
+          <StackPanel Grid.Column="0" VerticalAlignment="Center">
+            <TextBlock Text="最近打开" FontSize="14" FontWeight="SemiBold" />
+            <TextBlock Text="双击打开条目；右键查看更多操作"
+                       FontSize="11"
+                       Foreground="{StaticResource SecondaryTextBrush}" />
+          </StackPanel>
+
+          <!-- IsHitTestVisibleInChrome is an attached property and must be set on
+               the element itself: with WindowChrome the buttons are otherwise
+               treated as caption area and never receive clicks. -->
+          <Button Grid.Column="1"
+                  Content="刷新"
+                  Click="OnRefreshClick"
+                  Padding="12,5"
+                  Margin="0,0,6,0"
+                  Cursor="Hand"
+                  VerticalAlignment="Center" />
+
+          <Button Grid.Column="2"
+                  Content="✕"
+                  Click="OnCloseClick"
+                  Width="30" Height="28"
+                  Cursor="Hand"
+                  VerticalAlignment="Center"
+                  ToolTip="关闭" />
+        </Grid>
+      </Border>
+
+      <!-- ============================ notice strip shown when tracking is off -->
+      <Border Grid.Row="1"
+              x:Name="NoticeBar"
+              Visibility="Collapsed"
+              Background="#33E0A44A"
+              BorderBrush="{StaticResource WarningBrush}"
+              BorderThickness="0,1,0,1"
+              Padding="12,6">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0"
+                     x:Name="NoticeText"
+                     VerticalAlignment="Center"
+                     Foreground="{StaticResource WarningBrush}"
+                     TextWrapping="Wrap" />
+          <Button Grid.Column="1"
+                  Content="打开设置"
+                  Click="OnOpenSettingsClick"
+                  Padding="10,3"
+                  Cursor="Hand" />
+        </Grid>
+      </Border>
+
+      <!-- ============================ list -->
+      <Grid Grid.Row="2">
+        <ListView x:Name="ItemList"
+                  BorderThickness="0"
+                  Background="Transparent"
+                  Foreground="{StaticResource PrimaryTextBrush}"
+                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                  VirtualizingPanel.IsVirtualizing="True"
+                  VirtualizingPanel.VirtualizationMode="Recycling"
+                  PreviewMouseLeftButtonDown="OnListPreviewMouseDown">
+          <ListView.ItemContainerStyle>
+            <Style TargetType="ListViewItem">
+              <Setter Property="Padding" Value="6,4" />
+              <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+              <Setter Property="Focusable" Value="False" />
+              <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                  <Setter Property="Background" Value="{StaticResource HoverBrush}" />
+                </Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                  <Setter Property="Background" Value="{StaticResource SelectedBrush}" />
+                </Trigger>
+              </Style.Triggers>
+            </Style>
+          </ListView.ItemContainerStyle>
+
+          <ListView.ItemTemplate>
+            <DataTemplate DataType="{x:Type local:RecentItemViewModel}">
+              <Grid Background="Transparent"
+                    ToolTip="{Binding TargetPath}">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Grid.ContextMenu>
+                  <ContextMenu>
+                    <MenuItem Header="打开" Click="OnOpenClick" />
+                    <MenuItem Header="打开所在位置" Click="OnOpenFolderClick" />
+                    <Separator />
+                    <MenuItem Header="从列表移除" Click="OnRemoveClick" />
+                  </ContextMenu>
+                </Grid.ContextMenu>
+
+                <Image Grid.Column="0"
+                       Source="{Binding Icon}"
+                       Width="16" Height="16"
+                       Margin="0,0,8,0"
+                       VerticalAlignment="Center" />
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding DisplayName}"
+                             TextTrimming="CharacterEllipsis"
+                             FontWeight="SemiBold">
+                    <TextBlock.Style>
+                      <Style TargetType="TextBlock">
+                        <Style.Triggers>
+                          <!-- Dim rows whose target is gone rather than hiding
+                               them: a silently vanishing entry is more confusing
+                               than a visibly dead one. -->
+                          <DataTrigger Binding="{Binding IsMissing}" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
+                            <Setter Property="TextDecorations" Value="Strikethrough" />
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </TextBlock.Style>
+                  </TextBlock>
+                  <TextBlock Text="{Binding FolderPath}"
+                             FontSize="11"
+                             TextTrimming="CharacterEllipsis"
+                             Foreground="{StaticResource SecondaryTextBrush}" />
+                </StackPanel>
+
+                <TextBlock Grid.Column="2"
+                           Text="{Binding ValidityLabel}"
+                           FontSize="11"
+                           Margin="8,0"
+                           VerticalAlignment="Center"
+                           Foreground="{StaticResource WarningBrush}" />
+
+                <TextBlock Grid.Column="3"
+                           Text="{Binding RelativeTime}"
+                           FontSize="11"
+                           MinWidth="66"
+                           TextAlignment="Right"
+                           VerticalAlignment="Center"
+                           Foreground="{StaticResource SecondaryTextBrush}" />
+              </Grid>
+            </DataTemplate>
+          </ListView.ItemTemplate>
+        </ListView>
+
+        <!-- ============================ empty state overlays the list -->
+        <Border x:Name="EmptyState"
+                Background="{StaticResource GlassSurfaceBrush}"
+                Visibility="Collapsed">
+          <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420" Margin="24">
+            <TextBlock x:Name="EmptyTitle"
+                       Text="还没有记录"
+                       FontSize="15"
+                       FontWeight="SemiBold"
+                       HorizontalAlignment="Center" />
+            <TextBlock x:Name="EmptyDetail"
+                       Text=""
+                       Margin="0,8,0,0"
+                       TextWrapping="Wrap"
+                       TextAlignment="Center"
+                       Foreground="{StaticResource SecondaryTextBrush}" />
+            <Button x:Name="EmptyActionButton"
+                    Content="打开设置"
+                    Click="OnOpenSettingsClick"
+                    Margin="0,14,0,0"
+                    Padding="14,5"
+                    HorizontalAlignment="Center"
+                    Cursor="Hand"
+                    Visibility="Collapsed" />
+          </StackPanel>
+        </Border>
+      </Grid>
+
+      <!-- ============================ status bar -->
+      <Border Grid.Row="3"
+              Background="{StaticResource GlassHeaderBrush}"
+              CornerRadius="0,0,7,7"
+              Padding="12,6">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+
+          <TextBlock x:Name="StatusText"
+                     Grid.Column="0"
+                     Text="就绪"
+                     FontSize="11"
+                     VerticalAlignment="Center"
+                     Foreground="{StaticResource SecondaryTextBrush}" />
+
+          <!-- Watcher degradation is reported here rather than in a dialog: the
+               panel still works, only less promptly, so it must not interrupt. -->
+          <TextBlock x:Name="DegradedText"
+                     Grid.Column="1"
+                     Text=""
+                     FontSize="11"
+                     Margin="12,0"
+                     VerticalAlignment="Center"
+                     TextAlignment="Right"
+                     TextTrimming="CharacterEllipsis"
+                     Foreground="{StaticResource WarningBrush}" />
+
+          <Button x:Name="CleanupButton"
+                  Grid.Column="2"
+                  Content="清理失效"
+                  Click="OnCleanupClick"
+                  FontSize="11"
+                  Padding="8,2"
+                  Margin="0,0,10,0"
+                  Cursor="Hand"
+                  Visibility="Collapsed"
+                  ToolTip="删除 Recent 目录中目标已不存在的记录" />
+
+          <CheckBox x:Name="AutoStartCheck"
+                    Grid.Column="3"
+                    Content="开机自启"
+                    FontSize="11"
+                    VerticalAlignment="Center"
+                    Cursor="Hand"
+                    Checked="OnAutoStartChanged"
+                    Unchecked="OnAutoStartChanged" />
+        </Grid>
+      </Border>
+    </Grid>
+  </Border>
+</Window>

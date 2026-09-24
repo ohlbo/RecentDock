@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <!-- WinForms is enabled solely for NotifyIcon (the tray icon). WPF has no
+         built-in tray support and the plan rules out third-party packages. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>RecentDock.App</RootNamespace>
+    <AssemblyName>RecentDock</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <!-- Satisfies analyzer WFAC010, which fires because UseWindowsForms is on.
+         The manifest remains the authoritative DPI declaration for the process;
+         this property exists so the WinForms analyzer is content. -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- Version is surfaced by the self-test switch so a stale dist can be spotted
+         at once rather than by inspecting file timestamps. -->
+    <Version>0.4.0</Version>
+    <FileVersion>0.4.0.0</FileVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Embedded so the tray icon can be extracted from our own executable rather
+         than shipped as a second copy of the same artwork. -->
+    <Resource Include="app.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RecentDock.Core\RecentDock.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      net8.0-windows, not plain net8.0: Microsoft.Win32.Registry lives in the
+      Windows Desktop shared framework, so this avoids a NuGet dependency for
+      something already present. It also matches reality - this library is
+      Windows-only by definition (IShellLink, RecentDocs, the Recent folder).
+    -->
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <RootNamespace>RecentDock.Core</RootNamespace>
+    <!--
+      UseWPF is on only because ShellIconProvider converts shell HICONs via
+      System.Windows.Interop.Imaging / BitmapSource, which live in the WPF
+      assemblies. Those are BCL types, not UI controls: this library still contains
+      no XAML, no Window, and no third-party package, and stays independently
+      testable and reusable.
+    -->
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+  <!--
+    No NuGet dependencies at all. RecentDock.Core must stay free of WPF and of any
+    third-party package so that it remains independently reusable and testable, as
+    promised in DESIGN.md.
+  -->
+
+</Project>

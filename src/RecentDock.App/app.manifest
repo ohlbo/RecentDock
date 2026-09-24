@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <assemblyIdentity version="1.0.0.0" name="RecentDock.app" />
+
+  <!--
+    DPI awareness is NOT declared here.
+
+    The WinForms analyzer (WFAC010) forbids dpiAware/dpiAwareness in the manifest
+    once UseWindowsForms is on, and it cannot tell that WinForms is present only for
+    NotifyIcon while the sole visual surface is a WPF window. The process therefore
+    declares PerMonitorV2 at runtime instead - see App.DeclareDpiAwareness - with
+    ApplicationHighDpiMode set in the project file to keep the analyzer satisfied.
+
+    Without per-monitor v2 the panel renders blurry on mixed-DPI multi-monitor
+    setups, which is the common case for a desktop panel and a risk called out in
+    DESIGN.md M6.
+  -->
+
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10 / 11 -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+    </application>
+  </compatibility>
+</assembly>
