@@ -253,6 +253,12 @@ public partial class MainWindow : Window
         // restores them.
         WindowResizer.Attach(this);
 
+        // WindowChrome would normally have stripped the framish window styles; since
+        // this window does not use it, they are cleared explicitly here. Without this
+        // DWM keeps drawing a system frame around the panel no matter which DWMWA_*
+        // attributes are set.
+        AcrylicBackdrop.RemoveFrameStyles(this);
+
         ApplyDropShadow(_settings.ShowDropShadow);
 
         bool backdrop = AcrylicBackdrop.Apply(this, _settings.UseAcrylicBackdrop, _settings.UseDarkTheme);

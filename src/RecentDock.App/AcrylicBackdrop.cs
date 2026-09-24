@@ -39,6 +39,20 @@ public static class AcrylicBackdrop
     /// <summary>DWMWA_BORDER_COLOR (Windows 11).</summary>
     private const int DwmwaBorderColor = 34;
 
+    /// <summary>DWMWA_NCRENDERING_POLICY (Windows Vista+).</summary>
+    private const int DwmwaNcRenderingPolicy = 2;
+
+    /// <summary>
+    /// DWMNCRP_DISABLED. Stops DWM rendering the non-client area at all.
+    ///
+    /// Setting DWMWA_BORDER_COLOR to "none" only removes the border COLOUR; DWM still
+    /// renders the rest of the non-client frame, which on Windows 11 includes a 1px
+    /// frame and a soft shadow around the whole window rect. That is the second, larger
+    /// box that remains visible around a chrome-less window even after the border
+    /// colour is suppressed.
+    /// </summary>
+    private const int DwmNcRenderingDisabled = 1;
+
     /// <summary>
     /// DWMWA_COLOR_NONE. Tells DWM not to draw its own border at all.
     ///
@@ -99,6 +113,7 @@ public static class AcrylicBackdrop
             parts.Add($"backdropAttr={TrySetBackdrop(handle, DwmsbtTransientWindow)}");
             parts.Add($"cornerAttr={SetAttribute(handle, DwmwaWindowCornerPreference, DwmWindowCornerPreferenceRound)}");
             parts.Add($"borderColorAttr={SetAttribute(handle, DwmwaBorderColor, DwmwaColorNone)}");
+            parts.Add($"ncRenderingAttr={SetAttribute(handle, DwmwaNcRenderingPolicy, DwmNcRenderingDisabled)}");
         }
 
         return string.Join(", ", parts);
@@ -127,6 +142,113 @@ public static class AcrylicBackdrop
 
     [DllImport("dwmapi.dll", SetLastError = false)]
     private static extern int DwmIsCompositionEnabled([MarshalAs(UnmanagedType.Bool)] out bool pfEnabled);
+
+    /// <summary>
+    /// Report the window styles that make Windows treat a window as framed.
+    ///
+    /// WS_CAPTION and WS_THICKFRAME are the two bits that matter. Even with
+    /// WindowStyle="None", WPF adds WS_THICKFRAME for a resizable window, and DWM uses
+    /// those bits to decide whether to render a frame - so they can explain a border
+    /// that survives every DWMWA_* setting.
+    /// </summary>
+    public static string DescribeWindowStyles(Window window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+
+        IntPtr handle = new WindowInteropHelper(window).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            return "no handle";
+        }
+
+        long style = GetWindowLongPtr(handle, GWL_STYLE).ToInt64();
+        long exStyle = GetWindowLongPtr(handle, GWL_EXSTYLE).ToInt64();
+
+        const long WS_CAPTION = 0x00C00000;
+        const long WS_THICKFRAME = 0x00040000;
+        const long WS_BORDER = 0x00800000;
+        const long WS_EX_CLIENTEDGE = 0x00000200;
+        const long WS_EX_WINDOWEDGE = 0x00000100;
+
+        return $"CAPTION={(style & WS_CAPTION) != 0}"
+            + $" THICKFRAME={(style & WS_THICKFRAME) != 0}"
+            + $" BORDER={(style & WS_BORDER) != 0}"
+            + $" EX_CLIENTEDGE={(exStyle & WS_EX_CLIENTEDGE) != 0}"
+            + $" EX_WINDOWEDGE={(exStyle & WS_EX_WINDOWEDGE) != 0}";
+    }
+
+    /// <summary>
+    /// Strip the window styles that make Windows treat the window as framed.
+    ///
+    /// This is the piece that actually removes the system border, and it took a
+    /// measurement to find: every DWMWA_* attribute can be set successfully and the
+    /// frame still survives, because DWM decides whether to draw a frame from the
+    /// window STYLE bits, not from those attributes.
+    ///
+    /// Measured on a chrome-less WPF window: CAPTION=False, THICKFRAME=True,
+    /// EX_WINDOWEDGE=True. WS_THICKFRAME is added by WPF for a resizable window even
+    /// with WindowStyle="None", and WS_EX_WINDOWEDGE adds a raised edge on top.
+    /// WindowChrome would normally clear them, and this window deliberately does not
+    /// use WindowChrome, so nothing did.
+    ///
+    /// Resizing is unaffected: it is implemented by WindowResizer through
+    /// WM_NCHITTEST, which does not depend on these styles.
+    /// </summary>
+    public static void RemoveFrameStyles(Window window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+
+        IntPtr handle = new WindowInteropHelper(window).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        const long WS_THICKFRAME = 0x00040000;
+        const long WS_EX_WINDOWEDGE = 0x00000100;
+
+        long style = GetWindowLongPtr(handle, GWL_STYLE).ToInt64();
+        long exStyle = GetWindowLongPtr(handle, GWL_EXSTYLE).ToInt64();
+
+        long newStyle = style & ~WS_THICKFRAME;
+        long newExStyle = exStyle & ~WS_EX_WINDOWEDGE;
+
+        if (newStyle == style && newExStyle == exStyle)
+        {
+            return;
+        }
+
+        SetWindowLongPtr(handle, GWL_STYLE, new IntPtr(newStyle));
+        SetWindowLongPtr(handle, GWL_EXSTYLE, new IntPtr(newExStyle));
+
+        // Style changes only take effect after the frame has been recalculated;
+        // without this the window can keep painting the old frame until it is resized.
+        SetWindowPos(
+            handle,
+            IntPtr.Zero,
+            0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
+
+    private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_NOZORDER = 0x0004;
+    private const uint SWP_NOACTIVATE = 0x0010;
+    private const uint SWP_FRAMECHANGED = 0x0020;
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = false)]
+    private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    [DllImport("user32.dll", SetLastError = false)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(
+        IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
+    private const int GWL_STYLE = -16;
+    private const int GWL_EXSTYLE = -20;
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = false)]
+    private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
 
     /// <summary>
     /// Windows 11 22H2 build. DWMWA_SYSTEMBACKDROP_TYPE shipped with it; earlier
@@ -172,13 +294,18 @@ public static class AcrylicBackdrop
         // backdrop attribute below.
         SetAttribute(handle, DwmwaWindowCornerPreference, DwmWindowCornerPreferenceRound);
 
-        // Suppress the system-drawn frame.
+        // Remove the system frame. Two attributes are needed, because they suppress
+        // different parts of it:
         //
-        // Without this, Windows 11 draws its own 1px border PLUS an outer outline
-        // around the window even with WindowStyle="None". The outline sits outside the
-        // panel's rounded corner and reads as a second, larger box behind it - the
-        // "looks like a Windows frame" artefact. The panel draws its own hairline, so
-        // nothing is lost by removing the system one.
+        //   DWMWA_NCRENDERING_POLICY = DISABLED  stops DWM rendering the non-client
+        //                                        area, which is what draws the 1px
+        //                                        frame plus the soft window shadow.
+        //   DWMWA_BORDER_COLOR = NONE            removes the border colour on top of
+        //                                        that.
+        //
+        // Only setting the border colour was not enough: the frame and shadow stayed.
+        // The panel draws its own hairline (GlassBorderBrush), so nothing is lost.
+        SetAttribute(handle, DwmwaNcRenderingPolicy, DwmNcRenderingDisabled);
         SetAttribute(handle, DwmwaBorderColor, DwmwaColorNone);
 
         // Immersive dark mode drives the material's palette. 0 = light material.

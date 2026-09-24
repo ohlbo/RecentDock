@@ -407,6 +407,13 @@ public partial class App : Application
                 panel.UpdateLayout();
 
                 Log($"  backdrop diagnosis : {AcrylicBackdrop.Diagnose(panel)}");
+                Log($"  window styles      : {AcrylicBackdrop.DescribeWindowStyles(panel)}");
+
+                // Apply the style fix and confirm it took effect, since this is the
+                // step that actually removes the frame.
+                AcrylicBackdrop.RemoveFrameStyles(panel);
+                panel.UpdateLayout();
+                Log($"  styles after fix   : {AcrylicBackdrop.DescribeWindowStyles(panel)}");
 
                 // Try each material so the right one can be pinned down empirically
                 // rather than guessed at.
@@ -678,8 +685,24 @@ public partial class App : Application
             int Content = ToColor(GetPixel(hdcMemory, width / 2, height / 2));
             int Bottom = ToColor(GetPixel(hdcMemory, width / 2, height - 8));
 
+            // Walk inward along the top edge. A system frame shows up as a band of
+            // pixels at the very edge whose colour differs from the panel just inside,
+            // and reporting the run length says how thick it is.
+            var edge = new List<string>(8);
+            int lastPixel = -1;
+            for (int y = 0; y < 10; y++)
+            {
+                int pixel = ToColor(GetPixel(hdcMemory, width / 2, y));
+                if (pixel != lastPixel)
+                {
+                    edge.Add($"y{y}={pixel:X6}");
+                    lastPixel = pixel;
+                }
+            }
+
             return $"corner={Corner:X6} header={Header:X6} content={Content:X6} bottom={Bottom:X6}"
-                + $" | corner==content:{Corner == Content} header==content:{Header == Content}";
+                + $" | corner==content:{Corner == Content}"
+                + $" | topEdge {string.Join(" ", edge)}";
         }
         finally
         {
