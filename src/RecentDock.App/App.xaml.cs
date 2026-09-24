@@ -405,9 +405,79 @@ public partial class App : Application
         try
         {
             var dialog = new SettingsWindow(settings);
-            Layout(dialog, 420, 620);
 
-            Log("  SettingsWindow     : constructed and measured");
+            // Show it far off-screen rather than only measuring it.
+            //
+            // Measure/Arrange is not enough for a Window: without an HwndSource the
+            // visual tree is never realised, so every control reports a size of 0x0 and
+            // a hit test is meaningless. An earlier version of this check did exactly
+            // that and produced three bogus "BLOCKED zero size" results - a false
+            // failure caused by the test, not by the UI.
+            //
+            // Off-screen at -32000 keeps it invisible while still giving it a real
+            // window and a real layout pass.
+            dialog.WindowStartupLocation = WindowStartupLocation.Manual;
+            dialog.Left = -32000;
+            dialog.Top = -32000;
+            dialog.ShowInTaskbar = false;
+
+            try
+            {
+                dialog.Show();
+                dialog.UpdateLayout();
+            }
+            catch (Exception ex)
+            {
+                Log($"  note: could not realise the dialog ({ex.GetType().Name}); geometry checks skipped");
+            }
+
+            // Structural check, which is what actually catches the bug class.
+            //
+            // The opacity slider was undraggable because its hint label sat in
+            // Grid.Row="2" while the Grid declared only two RowDefinitions. WPF does
+            // not reject an out-of-range index - it silently places the element in the
+            // last defined row - so the mistake is invisible at compile time and the
+            // elements simply overlap.
+            //
+            // A hit test at the control's centre is NOT sufficient to detect this: an
+            // overlapping label usually sits at the bottom of the row and misses the
+            // centre, so the probe reports "fine" on broken markup. Verified by
+            // reintroducing the bug, which the hit test failed to catch. The row index
+            // check below does catch it.
+            List<string> layoutErrors = FindOutOfRangeGridRows(dialog);
+            if (layoutErrors.Count == 0)
+            {
+                Log("  grid rows          : all children inside their Grid's declared rows");
+            }
+            else
+            {
+                foreach (string error in layoutErrors)
+                {
+                    Log($"  FAIL grid row      : {error}");
+                }
+
+                exitCode = 1;
+            }
+
+            // Keep the hit test as a secondary signal: it catches a different class of
+            // problem, namely a control that is covered by a sibling.
+            foreach ((string label, System.Windows.Controls.Slider slider) in new[]
+            {
+                ("opacity", dialog.OpacitySliderControl),
+                ("font   ", dialog.FontSliderControl),
+                ("icon   ", dialog.IconSliderControl),
+            })
+            {
+                bool usable = CheckSliderUsable(slider, out string detail);
+                Log($"  slider {label}       : {(usable ? "draggable" : "BLOCKED")}  {detail}");
+
+                if (!usable)
+                {
+                    exitCode = 1;
+                }
+            }
+
+            Log("  SettingsWindow     : constructed, realised, layout checked");
             dialog.Close();
         }
         catch (Exception ex)
@@ -456,6 +526,102 @@ public partial class App : Application
         window.Measure(new Size(width, height));
         window.Arrange(new Rect(0, 0, width, height));
         window.UpdateLayout();
+    }
+
+    /// <summary>
+    /// Find Grid children placed in a row the Grid does not declare.
+    ///
+    /// WPF does not treat an out-of-range Grid.Row as an error: the element is placed
+    /// in the last defined row instead, so it silently overlaps whatever is already
+    /// there. That is how the opacity slider ended up covered by its own hint label.
+    /// Walking the realised tree and comparing the attached index against the Grid's
+    /// row count is the only reliable way to catch it.
+    /// </summary>
+    private static List<string> FindOutOfRangeGridRows(DependencyObject root)
+    {
+        var problems = new List<string>();
+
+        if (root is not System.Windows.Media.Visual and not System.Windows.Media.Media3D.Visual3D)
+        {
+            return problems;
+        }
+
+        int count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < count; i++)
+        {
+            DependencyObject child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+
+            if (root is System.Windows.Controls.Grid grid)
+            {
+                int declared = grid.RowDefinitions.Count;
+                if (declared > 0)
+                {
+                    // Grid.GetRow takes a UIElement; every visual child of a Grid is one.
+                    if (child is UIElement element)
+                    {
+                        int row = System.Windows.Controls.Grid.GetRow(element);
+                        if (row >= declared)
+                        {
+                            problems.Add(
+                                $"{child.GetType().Name} uses Grid.Row={row} but its Grid declares {declared} row(s)");
+                        }
+                    }
+                }
+            }
+
+            problems.AddRange(FindOutOfRangeGridRows(child));
+        }
+
+        return problems;
+    }
+
+    /// <summary>
+    /// Confirm a slider can be grabbed: it must have a usable range, and a hit test at
+    /// its own centre must land on it (or inside it) rather than on something layered
+    /// over it.
+    /// </summary>
+    private static bool CheckSliderUsable(System.Windows.Controls.Slider slider, out string detail)
+    {
+        if (slider.ActualWidth <= 0 || slider.ActualHeight <= 0)
+        {
+            detail = $"zero size ({slider.ActualWidth:F0}x{slider.ActualHeight:F0})";
+            return false;
+        }
+
+        if (slider.Maximum <= slider.Minimum)
+        {
+            detail = "empty range";
+            return false;
+        }
+
+        // Centre of the track, in the slider's own coordinates.
+        var probe = new Point(slider.ActualWidth / 2, slider.ActualHeight / 2);
+        IInputElement? hit = slider.InputHitTest(probe);
+
+        if (hit is null)
+        {
+            detail = "hit test found nothing";
+            return false;
+        }
+
+        // Walk up from whatever was hit: being inside the slider's visual tree is fine,
+        // being outside it means something is covering the control.
+        DependencyObject? node = hit as DependencyObject;
+        while (node is not null)
+        {
+            if (ReferenceEquals(node, slider))
+            {
+                detail = $"{slider.ActualWidth:F0}x{slider.ActualHeight:F0}, range {slider.Minimum:F2}-{slider.Maximum:F2}";
+                return true;
+            }
+
+            node = node is System.Windows.Media.Visual or System.Windows.Media.Media3D.Visual3D
+                ? System.Windows.Media.VisualTreeHelper.GetParent(node)
+                : System.Windows.LogicalTreeHelper.GetParent(node);
+        }
+
+        detail = $"covered by {hit.GetType().Name}";
+        return false;
     }
 
     /// <summary>

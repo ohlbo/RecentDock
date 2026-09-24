@@ -48,6 +48,13 @@ public partial class SettingsWindow : Window
     /// <summary>Current values as edited. Equal to the input when nothing was changed.</summary>
     public UiSettings Result { get; private set; }
 
+    /// <summary>Exposed so the UI smoke test can hit test the controls.</summary>
+    internal System.Windows.Controls.Slider OpacitySliderControl => OpacitySlider;
+
+    internal System.Windows.Controls.Slider FontSliderControl => FontSlider;
+
+    internal System.Windows.Controls.Slider IconSliderControl => IconSlider;
+
     private void OnOpacityChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (_loading)

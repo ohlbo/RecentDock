@@ -38,6 +38,15 @@
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto" />
         <RowDefinition Height="Auto" />
+        <!--
+          The hint line needs a row of its own. An earlier version declared only two
+          rows and put the hint in Grid.Row="2". WPF does NOT reject an out-of-range
+          row index: it places the element in the last defined row instead. The hint
+          therefore overlapped the slider and, being declared later, sat on top of it
+          and swallowed mouse input - the slider could not be dragged at all, while
+          the two below it worked.
+        -->
+        <RowDefinition Height="Auto" />
       </Grid.RowDefinitions>
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />
@@ -58,9 +67,11 @@
               Margin="0,6,0,0"
               ValueChanged="OnOpacityChanged" />
 
+      <!-- Never let a label intercept input meant for the control beneath it. -->
       <TextBlock Grid.Row="2" Grid.ColumnSpan="2"
                  Text="向左更透（更能看到桌面），向右更实（文字更清楚）"
                  Style="{DynamicResource CaptionTextStyle}"
+                 IsHitTestVisible="False"
                  Margin="0,2,0,0" />
     </Grid>
 
