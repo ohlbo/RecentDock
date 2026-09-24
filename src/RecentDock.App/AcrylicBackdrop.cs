@@ -36,6 +36,19 @@ public static class AcrylicBackdrop
     /// <summary>DWMWA_SYSTEMBACKDROP_TYPE (Windows 11 22H2+).</summary>
     private const int DwmwaSystemBackdropType = 38;
 
+    /// <summary>DWMWA_BORDER_COLOR (Windows 11).</summary>
+    private const int DwmwaBorderColor = 34;
+
+    /// <summary>
+    /// DWMWA_COLOR_NONE. Tells DWM not to draw its own border at all.
+    ///
+    /// Windows 11 draws a 1px frame plus an outer outline around every top-level
+    /// window, including chrome-less ones. It is visible as a second, slightly larger
+    /// box around the panel - which reads as "a Windows box behind my panel" and
+    /// ruins the glass edge, since the panel's own rounded corner is drawn inside it.
+    /// </summary>
+    private const int DwmwaColorNone = unchecked((int)0xFFFFFFFE);
+
     private const int DwmWindowCornerPreferenceRound = 2;
 
     /// <summary>DWMSBT_TRANSIENTWINDOW: the acrylic-like material suited to panels.</summary>
@@ -85,6 +98,7 @@ public static class AcrylicBackdrop
         {
             parts.Add($"backdropAttr={TrySetBackdrop(handle, DwmsbtTransientWindow)}");
             parts.Add($"cornerAttr={SetAttribute(handle, DwmwaWindowCornerPreference, DwmWindowCornerPreferenceRound)}");
+            parts.Add($"borderColorAttr={SetAttribute(handle, DwmwaBorderColor, DwmwaColorNone)}");
         }
 
         return string.Join(", ", parts);
@@ -157,6 +171,15 @@ public static class AcrylicBackdrop
         // Rounded corners. Cosmetic, and it succeeds even on builds that lack the
         // backdrop attribute below.
         SetAttribute(handle, DwmwaWindowCornerPreference, DwmWindowCornerPreferenceRound);
+
+        // Suppress the system-drawn frame.
+        //
+        // Without this, Windows 11 draws its own 1px border PLUS an outer outline
+        // around the window even with WindowStyle="None". The outline sits outside the
+        // panel's rounded corner and reads as a second, larger box behind it - the
+        // "looks like a Windows frame" artefact. The panel draws its own hairline, so
+        // nothing is lost by removing the system one.
+        SetAttribute(handle, DwmwaBorderColor, DwmwaColorNone);
 
         // Immersive dark mode drives the material's palette. 0 = light material.
         SetAttribute(handle, DwmwaUseImmersiveDarkMode, darkTheme ? 1 : 0);
