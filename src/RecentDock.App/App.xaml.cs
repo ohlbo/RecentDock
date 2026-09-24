@@ -300,6 +300,12 @@ public partial class App : Application
             Write("RecentDock self-test");
             Write($"  version            : {typeof(App).Assembly.GetName().Version}");
             Write($"  OS / backdrop      : {AcrylicBackdrop.DescribeSupport()}");
+
+            // Theme is reported because it has two independent halves - the XAML
+            // palette and the DWM material variant - and a mismatch between them is
+            // exactly what made a "light" build render black.
+            RecentDock.Core.Storage.UiSettings ui = RecentDock.Core.Storage.ConfigStore.Load();
+            Write($"  theme              : {(ui.UseDarkTheme ? "dark" : "light (white glass)")}, acrylic {(ui.UseAcrylicBackdrop ? "on" : "off")}");
             Write($"  state directory    : {RecentDock.Core.Storage.AppPaths.StateDirectory}");
             Write($"  settings link      : {EnvironmentProbe.GetSettingsUri()}");
             Write($"  autostart entry    : {(AutoStart.IsEnabled() ? "present" : "absent")}");

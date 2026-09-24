@@ -39,7 +39,9 @@
           CornerRadius="8"
           Background="{StaticResource GlassTintBrush}">
     <Border.Effect>
-      <DropShadowEffect BlurRadius="18" ShadowDepth="0" Opacity="0.45" Color="#000000" />
+      <!-- Softer and lighter than the dark theme's shadow: a heavy black halo around
+           white glass reads as a smudge rather than depth. -->
+      <DropShadowEffect BlurRadius="20" ShadowDepth="0" Opacity="0.28" Color="#000000" />
     </Border.Effect>
 
     <Grid>
@@ -94,7 +96,7 @@
       <Border Grid.Row="1"
               x:Name="NoticeBar"
               Visibility="Collapsed"
-              Background="#33E0A44A"
+              Background="#33E8B25C"
               BorderBrush="{StaticResource WarningBrush}"
               BorderThickness="0,1,0,1"
               Padding="12,6">

@@ -57,7 +57,16 @@ public static class AcrylicBackdrop
     /// True when a system backdrop was applied. False means the caller is relying on
     /// the XAML panels alone, which is a normal outcome on Windows 10.
     /// </returns>
-    public static bool Apply(Window window, bool enable)
+    /// <param name="darkTheme">
+    /// Selects the material's light or dark variant.
+    ///
+    /// This is NOT cosmetic and it is not optional: the DWM acrylic material derives
+    /// its own colours from this flag, so asking for a dark material makes the surface
+    /// behind the client area genuinely black no matter how light the XAML panels are.
+    /// An early version hard-coded dark mode here, which is why a light theme still
+    /// rendered as black.
+    /// </param>
+    public static bool Apply(Window window, bool enable, bool darkTheme)
     {
         ArgumentNullException.ThrowIfNull(window);
 
@@ -72,10 +81,12 @@ public static class AcrylicBackdrop
             return false;
         }
 
-        // Rounded corners and a dark title bar treatment. Both cosmetic, and both
-        // succeed on builds that lack the backdrop attribute below.
+        // Rounded corners. Cosmetic, and it succeeds even on builds that lack the
+        // backdrop attribute below.
         SetAttribute(handle, DwmwaWindowCornerPreference, DwmWindowCornerPreferenceRound);
-        SetAttribute(handle, DwmwaUseImmersiveDarkMode, 1);
+
+        // Immersive dark mode drives the material's palette. 0 = light material.
+        SetAttribute(handle, DwmwaUseImmersiveDarkMode, darkTheme ? 1 : 0);
 
         return SetAttribute(handle, DwmwaSystemBackdropType, DwmsbtTransientWindow);
     }

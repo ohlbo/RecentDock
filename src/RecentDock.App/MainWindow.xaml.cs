@@ -220,7 +220,7 @@ public partial class MainWindow : Window
         // restores them.
         WindowResizer.Attach(this);
 
-        bool backdrop = AcrylicBackdrop.Apply(this, _settings.UseAcrylicBackdrop);
+        bool backdrop = AcrylicBackdrop.Apply(this, _settings.UseAcrylicBackdrop, _settings.UseDarkTheme);
         if (!backdrop && _settings.UseAcrylicBackdrop)
         {
             // Expected on Windows 10. The translucent XAML panels provide the

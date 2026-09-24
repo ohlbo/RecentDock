@@ -8,39 +8,51 @@
   -->
   <Application.Resources>
     <!--
-      Translucent theme.
+      LIGHT translucent theme - white glass.
 
-      Every surface here is deliberately semi-transparent: the window itself is
-      transparent and the DWM paints its acrylic material behind it, so these
-      alphas control how strongly the material reads through each region. They are
-      also the entire appearance on Windows 10, where no system backdrop exists -
-      which is why the alphas are high enough to keep text legible on their own
-      rather than relying on the backdrop for contrast.
+      Important: the XAML palette is only half the appearance. The window itself is
+      transparent and the DWM paints its acrylic material behind the client area, so
+      the material's light/dark variant decides the base colour. That variant is
+      selected by DWMWA_USE_IMMERSIVE_DARK_MODE in AcrylicBackdrop.Apply, and it is
+      NOT taken from this file. A dark material under a light palette still renders
+      as a black panel, which is exactly what happened before.
 
-      Alpha budget, darkest to lightest:
-        0xE6 (90%) outer tint   - sets the overall depth
-        0xD9 (85%) header/footer - a touch heavier, reads as chrome
-        0xCC (80%) list surface  - lightest, so the content area feels open
+      Alpha budget. These surfaces sit ON TOP of the material, so:
+        - too opaque  -> the glass is invisible and it looks like a flat panel
+        - too clear   -> text loses contrast, especially on Windows 10 where there
+                         is no acrylic behind it at all.
+
+      White tint needs less opacity than a dark one for the same legibility, because
+      dark text on light glass keeps its contrast further down. Measured by eye at
+      the current values; 0xB3 is the sweet spot for the content area.
+
+        0xB3 (70%) content area  - lightest, lets the desktop read through
+        0xC0 (75%) header/footer  - a touch heavier, reads as window chrome
+        0xCC (80%) outer tint     - sets the overall depth
     -->
-    <SolidColorBrush x:Key="GlassTintBrush" Color="#E61A1B1F" />
-    <SolidColorBrush x:Key="GlassHeaderBrush" Color="#D924252B" />
-    <SolidColorBrush x:Key="GlassSurfaceBrush" Color="#CC16171A" />
-    <SolidColorBrush x:Key="GlassBorderBrush" Color="#4DFFFFFF" />
+    <SolidColorBrush x:Key="GlassTintBrush" Color="#CCFFFFFF" />
+    <SolidColorBrush x:Key="GlassHeaderBrush" Color="#C0FFFFFF" />
+    <SolidColorBrush x:Key="GlassSurfaceBrush" Color="#B3FFFFFF" />
+    <SolidColorBrush x:Key="GlassBorderBrush" Color="#59FFFFFF" />
 
-    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#FFEDEEF1" />
-    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#FFA2A6AE" />
-    <SolidColorBrush x:Key="AccentBrush" Color="#FF4C8DF6" />
-    <SolidColorBrush x:Key="WarningBrush" Color="#FFE8B25C" />
+    <!-- Text: near-black rather than pure black, which reads softer on glass. -->
+    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#FF1C1C20" />
+    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#FF5F6068" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#FF2F6FD8" />
 
-    <!-- Row states stay translucent too, so hovering does not punch an opaque hole
-         in the glass. -->
-    <SolidColorBrush x:Key="HoverBrush" Color="#1FFFFFFF" />
-    <SolidColorBrush x:Key="SelectedBrush" Color="#334C8DF6" />
+    <!-- Missing/failed markers need to stay legible on white: a mid amber works,
+         a pale one disappears. -->
+    <SolidColorBrush x:Key="WarningBrush" Color="#FFB4651A" />
 
-    <!-- Buttons: flat, translucent, with a visible hover rather than a border. -->
+    <!-- Row states darken instead of lighten, since the surface is light.
+         Hovering must not turn a row into an opaque block. -->
+    <SolidColorBrush x:Key="HoverBrush" Color="#14000000" />
+    <SolidColorBrush x:Key="SelectedBrush" Color="#332F6FD8" />
+
+    <!-- Buttons: flat and translucent, distinguished by hover rather than a border. -->
     <Style TargetType="Button">
       <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
-      <Setter Property="Background" Value="#1AFFFFFF" />
+      <Setter Property="Background" Value="#14000000" />
       <Setter Property="BorderThickness" Value="0" />
       <Setter Property="Padding" Value="10,4" />
       <Setter Property="Template">
@@ -54,10 +66,10 @@
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Root" Property="Background" Value="#33FFFFFF" />
+                <Setter TargetName="Root" Property="Background" Value="#22000000" />
               </Trigger>
               <Trigger Property="IsPressed" Value="True">
-                <Setter TargetName="Root" Property="Background" Value="#4DFFFFFF" />
+                <Setter TargetName="Root" Property="Background" Value="#38000000" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -66,14 +78,14 @@
     </Style>
 
     <!--
-      Context menu needs to be translucent as well: an opaque popup next to a glass
-      panel looks like a rendering bug. The default WPF menu chrome is opaque, so it
-      is replaced.
+      The context menu is a separate popup with no acrylic behind it, so it needs a
+      much more opaque fill than the panel: at panel alphas the desktop shows straight
+      through and the text becomes unreadable. Near-opaque white with a hairline.
     -->
     <Style TargetType="ContextMenu">
-      <Setter Property="Background" Value="#F21F2024" />
+      <Setter Property="Background" Value="#F7F7F8FA" />
       <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
-      <Setter Property="BorderBrush" Value="{StaticResource GlassBorderBrush}" />
+      <Setter Property="BorderBrush" Value="#33000000" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="Template">
         <Setter.Value>
@@ -95,13 +107,13 @@
       <Setter Property="Padding" Value="10,5" />
       <Style.Triggers>
         <Trigger Property="IsHighlighted" Value="True">
-          <Setter Property="Background" Value="#334C8DF6" />
+          <Setter Property="Background" Value="#332F6FD8" />
         </Trigger>
       </Style.Triggers>
     </Style>
 
     <Style TargetType="Separator">
-      <Setter Property="Background" Value="#26FFFFFF" />
+      <Setter Property="Background" Value="#26000000" />
       <Setter Property="Height" Value="1" />
       <Setter Property="Margin" Value="4,3" />
     </Style>

@@ -91,6 +91,17 @@ public sealed record UiSettings
     /// </summary>
     public bool UseAcrylicBackdrop { get; init; } = true;
 
+    /// <summary>
+    /// Dark theme. False (the default) uses the light, white-glass appearance.
+    ///
+    /// This must not be confused with the Windows system theme: it is passed to the
+    /// DWM as the material's light/dark variant, and the XAML palette is built for the
+    /// light variant. Following the system setting automatically is possible later,
+    /// but the palette is currently a single compiled-in set, so a switch would need
+    /// runtime resource swapping.
+    /// </summary>
+    public bool UseDarkTheme { get; init; }
+
     /// <summary>Start minimised to the tray.</summary>
     public bool StartHidden { get; init; }
 
