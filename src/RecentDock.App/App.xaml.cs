@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using RecentDock.Core;
 using RecentDock.Core.Interop;
@@ -421,6 +422,23 @@ public partial class App : Application
                     Log($"  backdrop {name}     : set={ok}");
                 }
 
+                // Settle, then read actual pixels. Everything else in this report is
+                // the app's own opinion; the pixels are the ground truth and are what
+                // distinguishes "the material rendered" from "an opaque layer covers
+                // it".
+                panel.UpdateLayout();
+                panel.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                System.Threading.Thread.Sleep(600);
+                panel.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+
+                Log($"  pixels (mica)      : {SampleWindowPixels(panel)}");
+
+                AcrylicBackdrop.TrySetBackdrop(
+                    new System.Windows.Interop.WindowInteropHelper(panel).Handle,
+                    AcrylicBackdrop.BackdropAcrylic);
+                System.Threading.Thread.Sleep(400);
+                Log($"  pixels (acrylic)   : {SampleWindowPixels(panel)}");
+
                 panel.Hide();
             }
             catch (Exception ex)
@@ -611,6 +629,110 @@ public partial class App : Application
     }
 
     /// <summary>
+    /// Capture the window and read a few pixels, to establish what is actually on
+    /// screen rather than what the application believes.
+    ///
+    /// Every other diagnostic here reports settings - transparent background, material
+    /// applied, composition enabled - and all of them can read as correct while the
+    /// user sees a black rectangle. Sampling the rendered pixels is the only check
+    /// that closes that gap: if the top-left corner and the content area are not the
+    /// same colour, whatever is covering the material is inside the window rather than
+    /// being the window itself.
+    /// </summary>
+    private static string SampleWindowPixels(Window window)
+    {
+        IntPtr handle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+        if (handle == IntPtr.Zero || !GetWindowRect(handle, out RECT rect))
+        {
+            return "no window rect";
+        }
+
+        int width = rect.Right - rect.Left;
+        int height = rect.Bottom - rect.Top;
+        if (width <= 0 || height <= 0)
+        {
+            return $"empty rect {width}x{height}";
+        }
+
+        IntPtr hdcScreen = CreateDC("DISPLAY", null, null, IntPtr.Zero);
+        if (hdcScreen == IntPtr.Zero)
+        {
+            return "no screen dc";
+        }
+
+        IntPtr hdcMemory = CreateCompatibleDC(hdcScreen);
+        IntPtr bitmap = CreateCompatibleBitmap(hdcScreen, width, height);
+        IntPtr previous = SelectObject(hdcMemory, bitmap);
+
+        try
+        {
+            // PW_RENDERFULLCONTENT (2) is required; without it a composed window
+            // captures as blank, which would look like a false failure.
+            if (!PrintWindow(handle, hdcMemory, 2))
+            {
+                return "PrintWindow failed";
+            }
+
+            int Corner = ToColor(GetPixel(hdcMemory, 1, 1));
+            int Header = ToColor(GetPixel(hdcMemory, width / 2, 30));
+            int Content = ToColor(GetPixel(hdcMemory, width / 2, height / 2));
+            int Bottom = ToColor(GetPixel(hdcMemory, width / 2, height - 8));
+
+            return $"corner={Corner:X6} header={Header:X6} content={Content:X6} bottom={Bottom:X6}"
+                + $" | corner==content:{Corner == Content} header==content:{Header == Content}";
+        }
+        finally
+        {
+            SelectObject(hdcMemory, previous);
+            DeleteObject(bitmap);
+            DeleteDC(hdcMemory);
+            DeleteDC(hdcScreen);
+        }
+    }
+
+    private static int ToColor(uint bgr) => (int)(bgr & 0x00FFFFFF);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [DllImport("user32.dll", SetLastError = false)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll", SetLastError = false)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint nFlags);
+
+    [DllImport("gdi32.dll", CharSet = CharSet.Unicode, SetLastError = false)]
+    private static extern IntPtr CreateDC(string? driver, string? device, string? output, IntPtr initData);
+
+    [DllImport("gdi32.dll", SetLastError = false)]
+    private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+
+    [DllImport("gdi32.dll", SetLastError = false)]
+    private static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int width, int height);
+
+    [DllImport("gdi32.dll", SetLastError = false)]
+    private static extern IntPtr SelectObject(IntPtr hdc, IntPtr obj);
+
+    [DllImport("gdi32.dll", SetLastError = false)]
+    private static extern uint GetPixel(IntPtr hdc, int x, int y);
+
+    [DllImport("gdi32.dll", SetLastError = false)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeleteObject(IntPtr obj);
+
+    [DllImport("gdi32.dll", SetLastError = false)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeleteDC(IntPtr hdc);
+
+    /// <summary>
     /// Confirm a slider can be grabbed: it must have a usable range, and a hit test at
     /// its own centre must land on it (or inside it) rather than on something layered
     /// over it.
@@ -785,6 +907,35 @@ public partial class App : Application
             if (result.Items.Count == 0)
             {
                 Write("  (nothing to display)");
+            }
+
+            // Show the live panel and sample its pixels. This is the one line that
+            // answers "is the glass actually transparent", as opposed to reporting
+            // settings that all look correct while the user sees something else.
+            try
+            {
+                var probe = new MainWindow
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual,
+                    Left = -32000,
+                    Top = -32000,
+                    ShowInTaskbar = false,
+                };
+
+                probe.Show();
+                probe.UpdateLayout();
+                probe.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                System.Threading.Thread.Sleep(500);
+
+                Write($"\n  live pixels        : {SampleWindowPixels(probe)}");
+                Write("    (corner is the rounded edge outside the panel; content is the list area)");
+                Write("    corner near 000000 means the material is NOT compositing;");
+
+                probe.Close();
+            }
+            catch (Exception ex)
+            {
+                Write($"  live pixels        : unavailable ({ex.GetType().Name})");
             }
 
             // -------------------------------------------------- snapshot overlay
