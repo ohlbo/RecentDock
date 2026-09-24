@@ -352,6 +352,25 @@ public partial class App : Application
         {
             ThemeManager.Apply(settings);
             Log($"  theme applied      : opacity={settings.PanelOpacity:F2} font={settings.FontSize:F0} icon={settings.IconSize:F0}");
+
+            // Report whether the palette brushes are actually mutable. WPF freezes
+            // Freezables declared in a ResourceDictionary, and a frozen brush cannot
+            // be recoloured - which is exactly how the opacity slider ended up doing
+            // nothing while the font and icon sliders worked.
+            Log($"  brush mutability   : {ThemeManager.DescribeBrushState()}");
+
+            // The decisive check: does the opacity setting actually change the colour
+            // that the window will paint? A frozen brush made this a no-op while
+            // everything still reported success, so the value itself is asserted.
+            Log($"  opacity 0.55 alpha : {ThemeManager.DescribeSurfaceAlphas()}");
+
+            ThemeManager.Apply(settings with { PanelOpacity = 1.0 });
+            Log($"  opacity 1.00 alpha : {ThemeManager.DescribeSurfaceAlphas()}");
+
+            ThemeManager.Apply(settings with { PanelOpacity = 0.3 });
+            Log($"  opacity 0.30 alpha : {ThemeManager.DescribeSurfaceAlphas()}");
+
+            ThemeManager.Apply(settings);
         }
         catch (Exception ex)
         {

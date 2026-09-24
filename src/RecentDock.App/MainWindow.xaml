@@ -7,7 +7,7 @@
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
         Background="Transparent"
-        Foreground="{StaticResource PrimaryTextBrush}"
+        Foreground="{DynamicResource PrimaryTextBrush}"
         FontFamily="Microsoft YaHei UI, Segoe UI"
         FontSize="13"
         TextOptions.TextFormattingMode="Display"
@@ -34,10 +34,10 @@
 
   <!-- Outer frame: 1px hairline plus a soft shadow to lift the panel off the
        desktop. The fill is intentionally faint so the backdrop dominates. -->
-  <Border BorderBrush="{StaticResource GlassBorderBrush}"
+  <Border BorderBrush="{DynamicResource GlassBorderBrush}"
           BorderThickness="1"
           CornerRadius="8"
-          Background="{StaticResource GlassTintBrush}">
+          Background="{DynamicResource GlassTintBrush}">
     <Border.Effect>
       <!-- Softer and lighter than the dark theme's shadow: a heavy black halo around
            white glass reads as a smudge rather than depth. -->
@@ -54,7 +54,7 @@
 
       <!-- ============================ header, doubles as the drag handle -->
       <Border Grid.Row="0"
-              Background="{StaticResource GlassHeaderBrush}"
+              Background="{DynamicResource GlassHeaderBrush}"
               CornerRadius="7,7,0,0"
               MouseLeftButtonDown="OnDragAreaMouseLeftButtonDown">
         <Grid Margin="12,8,8,8">
@@ -102,7 +102,7 @@
               x:Name="NoticeBar"
               Visibility="Collapsed"
               Background="#33E8B25C"
-              BorderBrush="{StaticResource WarningBrush}"
+              BorderBrush="{DynamicResource WarningBrush}"
               BorderThickness="0,1,0,1"
               Padding="12,6">
         <Grid>
@@ -113,7 +113,7 @@
           <TextBlock Grid.Column="0"
                      x:Name="NoticeText"
                      VerticalAlignment="Center"
-                     Foreground="{StaticResource WarningBrush}"
+                     Foreground="{DynamicResource WarningBrush}"
                      TextWrapping="Wrap" />
           <Button Grid.Column="1"
                   Content="打开设置"
@@ -128,7 +128,7 @@
         <ListView x:Name="ItemList"
                   BorderThickness="0"
                   Background="Transparent"
-                  Foreground="{StaticResource PrimaryTextBrush}"
+                  Foreground="{DynamicResource PrimaryTextBrush}"
                   ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                   VirtualizingPanel.IsVirtualizing="True"
                   VirtualizingPanel.VirtualizationMode="Recycling"
@@ -140,10 +140,10 @@
               <Setter Property="Focusable" Value="False" />
               <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                  <Setter Property="Background" Value="{StaticResource HoverBrush}" />
+                  <Setter Property="Background" Value="{DynamicResource HoverBrush}" />
                 </Trigger>
                 <Trigger Property="IsSelected" Value="True">
-                  <Setter Property="Background" Value="{StaticResource SelectedBrush}" />
+                  <Setter Property="Background" Value="{DynamicResource SelectedBrush}" />
                 </Trigger>
               </Style.Triggers>
             </Style>
@@ -198,7 +198,7 @@
                                them: a silently vanishing entry is more confusing
                                than a visibly dead one. -->
                           <DataTrigger Binding="{Binding IsMissing}" Value="True">
-                            <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
                             <Setter Property="TextDecorations" Value="Strikethrough" />
                           </DataTrigger>
                         </Style.Triggers>
@@ -214,7 +214,7 @@
                            Style="{DynamicResource CaptionTextStyle}"
                            Margin="8,0"
                            VerticalAlignment="Center"
-                           Foreground="{StaticResource WarningBrush}" />
+                           Foreground="{DynamicResource WarningBrush}" />
 
                 <TextBlock Grid.Column="3"
                            Text="{Binding RelativeTime}"
@@ -222,7 +222,7 @@
                            MinWidth="66"
                            TextAlignment="Right"
                            VerticalAlignment="Center"
-                           Foreground="{StaticResource SecondaryTextBrush}" />
+                           Foreground="{DynamicResource SecondaryTextBrush}" />
               </Grid>
             </DataTemplate>
           </ListView.ItemTemplate>
@@ -230,7 +230,7 @@
 
         <!-- ============================ empty state overlays the list -->
         <Border x:Name="EmptyState"
-                Background="{StaticResource GlassSurfaceBrush}"
+                Background="{DynamicResource GlassSurfaceBrush}"
                 Visibility="Collapsed">
           <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420" Margin="24">
             <TextBlock x:Name="EmptyTitle"
@@ -257,7 +257,7 @@
 
       <!-- ============================ status bar -->
       <Border Grid.Row="3"
-              Background="{StaticResource GlassHeaderBrush}"
+              Background="{DynamicResource GlassHeaderBrush}"
               CornerRadius="0,0,7,7"
               Padding="12,6">
         <Grid>
@@ -280,7 +280,7 @@
                      Grid.Column="1"
                      Text=""
                      Style="{DynamicResource CaptionTextStyle}"
-                     Foreground="{StaticResource WarningBrush}"
+                     Foreground="{DynamicResource WarningBrush}"
                      Margin="12,0"
                      VerticalAlignment="Center"
                      TextAlignment="Right" />

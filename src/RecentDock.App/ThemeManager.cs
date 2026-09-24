@@ -146,33 +146,23 @@ public static class ThemeManager
     }
 
     /// <summary>
-    /// Recolour a brush in place. Falls back to inserting a new brush when the key is
-    /// missing, which keeps a mis-typed key from failing silently.
+    /// Recolour a palette brush by REPLACING the resource.
+    ///
+    /// In-place mutation was tried first and does not work: the XAML compiler freezes
+    /// Freezables declared in a ResourceDictionary (and po:Freeze="False" does not
+    /// prevent it here), so brush.Color cannot be assigned. The UI smoke test reports
+    /// each brush as frozen or mutable to make that visible rather than silent.
+    ///
+    /// Replacement only reaches elements if they reference the brush dynamically, so
+    /// every palette reference in the XAML uses DynamicResource. That is what makes
+    /// the opacity slider actually move something.
     /// </summary>
     private static void MutateBrush(string key, Color color, byte alpha)
     {
-        if (Application.Current?.TryFindResource(key) is SolidColorBrush brush)
-        {
-            if (brush.IsFrozen)
-            {
-                // Cannot mutate a frozen brush - a declared one from a ResourceDictionary
-                // is frozen only if explicitly marked so, but handle it defensively
-                // rather than throwing at runtime.
-                ReplaceResource(key, Freeze(new SolidColorBrush(Color.FromArgb(alpha, color.R, color.G, color.B))));
-                return;
-            }
-
-            brush.Color = Color.FromArgb(alpha, color.R, color.G, color.B);
-            return;
-        }
-
-        ReplaceResource(key, Freeze(new SolidColorBrush(Color.FromArgb(alpha, color.R, color.G, color.B))));
-    }
-
-    private static SolidColorBrush Freeze(SolidColorBrush brush)
-    {
+        var brush = new SolidColorBrush(Color.FromArgb(alpha, color.R, color.G, color.B));
         brush.Freeze();
-        return brush;
+
+        ReplaceResource(key, brush);
     }
 
     /// <summary>
@@ -201,4 +191,66 @@ public static class ThemeManager
     /// <summary>Multiply a baseline alpha, clamped into the valid byte range.</summary>
     private static byte Scale(byte baseAlpha, double factor)
         => (byte)Math.Clamp(baseAlpha * factor, 0, 255);
+
+    /// <summary>
+    /// Report whether the palette brushes can be recoloured in place, for diagnostics.
+    ///
+    /// A frozen brush silently defeats in-place recolouring, and the fallback path
+    /// (replacing the resource) does not reach elements that already resolved the
+    /// brush via StaticResource. That combination is invisible: the setting appears to
+    /// save but nothing changes on screen.
+    /// </summary>
+    public static string DescribeBrushState()
+    {
+        string[] keys =
+        {
+            "GlassTintBrush",
+            "GlassHeaderBrush",
+            "GlassSurfaceBrush",
+            "PrimaryTextBrush",
+            "HoverBrush",
+        };
+
+        var parts = new List<string>(keys.Length);
+        foreach (string key in keys)
+        {
+            if (Application.Current?.TryFindResource(key) is SolidColorBrush brush)
+            {
+                parts.Add($"{key}={(brush.IsFrozen ? "frozen" : "mutable")}");
+            }
+            else
+            {
+                parts.Add($"{key}=missing");
+            }
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    /// <summary>
+    /// Current alpha of each translucent surface, for diagnostics.
+    ///
+    /// This is the value that decides what the window actually paints, so asserting
+    /// it is the only way to prove the opacity setting has an effect. Everything else
+    /// can report success while the pixels never change.
+    /// </summary>
+    public static string DescribeSurfaceAlphas()
+    {
+        string[] keys = { "GlassTintBrush", "GlassHeaderBrush", "GlassSurfaceBrush" };
+
+        var parts = new List<string>(keys.Length);
+        foreach (string key in keys)
+        {
+            if (Application.Current?.TryFindResource(key) is SolidColorBrush brush)
+            {
+                parts.Add($"{key.Replace("Glass", string.Empty).Replace("Brush", string.Empty)}=0x{brush.Color.A:X2}");
+            }
+            else
+            {
+                parts.Add($"{key}=missing");
+            }
+        }
+
+        return string.Join(", ", parts);
+    }
 }
