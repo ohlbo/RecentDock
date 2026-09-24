@@ -32,18 +32,20 @@
     provide the appearance: dimmer, still correct.
   -->
 
-  <!-- Outer frame: 1px hairline plus a soft shadow to lift the panel off the
-       desktop. The fill is intentionally faint so the backdrop dominates. -->
-  <Border BorderBrush="{DynamicResource GlassBorderBrush}"
+  <!-- Outer frame: 1px hairline over the DWM material. The fill is intentionally
+       faint so the material reads through.
+
+       Note: no Border.Effect here. A drop shadow forces WPF to render the border
+       into an intermediate surface, and in this chrome-less setup that surface
+       composites as an opaque black rectangle - the material behind it never shows,
+       so the panel looks painted on black and lowering opacity just reveals more
+       black. The shadow is therefore opt-in, applied from code when the user asks
+       for it. -->
+  <Border x:Name="FrameBorder"
+          BorderBrush="{DynamicResource GlassBorderBrush}"
           BorderThickness="1"
           CornerRadius="8"
           Background="{DynamicResource GlassTintBrush}">
-    <Border.Effect>
-      <!-- Softer and lighter than the dark theme's shadow: a heavy black halo around
-           white glass reads as a smudge rather than depth. -->
-      <DropShadowEffect BlurRadius="20" ShadowDepth="0" Opacity="0.28" Color="#000000" />
-    </Border.Effect>
-
     <Grid>
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto" />   <!-- header -->

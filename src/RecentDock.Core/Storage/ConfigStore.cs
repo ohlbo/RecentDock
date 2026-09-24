@@ -121,6 +121,21 @@ public sealed record UiSettings
     /// <summary>Row icon size in device-independent pixels.</summary>
     public double IconSize { get; init; } = 16;
 
+    /// <summary>
+    /// Draw a drop shadow around the panel.
+    ///
+    /// Off by default, and that default is deliberate: the shadow is implemented with
+    /// a Border.Effect, which makes WPF render the border into an intermediate
+    /// surface. In a chrome-less window whose appearance depends on the DWM material
+    /// showing through, that intermediate surface composites as an opaque black
+    /// rectangle - so the panel looked like it was painted on black and lowering the
+    /// opacity only revealed more black.
+    ///
+    /// Kept as a switch rather than removed: on a machine where the effect composites
+    /// correctly it is a nice touch, and this way it can be verified per machine.
+    /// </summary>
+    public bool ShowDropShadow { get; init; }
+
     /// <summary>Start minimised to the tray.</summary>
     public bool StartHidden { get; init; }
 

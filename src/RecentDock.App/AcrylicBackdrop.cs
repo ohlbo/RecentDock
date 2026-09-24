@@ -42,6 +42,79 @@ public static class AcrylicBackdrop
     private const int DwmsbtTransientWindow = 3;
 
     /// <summary>
+    /// Diagnose why a backdrop is or is not visible.
+    ///
+    /// Three independent things must all hold, and a failure in any one produces the
+    /// same symptom - a panel that looks like it is painted on black:
+    ///
+    ///   1. The window's client area must actually be transparent. WPF falls back to
+    ///      software rendering in some environments, and a software-rendered window is
+    ///      composited with an opaque black client area, so the material behind it can
+    ///      never show.
+    ///   2. DWMSBT_* support must be present (Windows 11 22H2+).
+    ///   3. DwmSetWindowAttribute must actually succeed - the call returns a failure
+    ///      HRESULT rather than throwing.
+    ///
+    /// Reporting all three at once is what turns "it looks black" into an actionable
+    /// cause.
+    /// </summary>
+    public static string Diagnose(Window window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+
+        var parts = new List<string>();
+
+        try
+        {
+            parts.Add($"renderTier={System.Windows.Media.RenderCapability.Tier >> 16}");
+        }
+        catch (Exception)
+        {
+            parts.Add("renderTier=?");
+        }
+
+        parts.Add($"hwAccel={System.Windows.Media.RenderCapability.IsPixelShaderVersionSupported(2, 0)}");
+        parts.Add($"dwmComposition={IsCompositionEnabled()}");
+        parts.Add($"win11_22H2+={IsSystemBackdropSupported()}");
+        parts.Add($"windowBg={(window.Background is null ? "null" : window.Background.ToString())}");
+
+        IntPtr handle = new WindowInteropHelper(window).Handle;
+        parts.Add($"handle={handle != IntPtr.Zero}");
+
+        if (handle != IntPtr.Zero)
+        {
+            parts.Add($"backdropAttr={TrySetBackdrop(handle, DwmsbtTransientWindow)}");
+            parts.Add($"cornerAttr={SetAttribute(handle, DwmwaWindowCornerPreference, DwmWindowCornerPreferenceRound)}");
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    /// <summary>Test a specific backdrop material, for A/B comparison.</summary>
+    public static bool TrySetBackdrop(IntPtr handle, int backdropType)
+        => handle != IntPtr.Zero && SetAttribute(handle, DwmwaSystemBackdropType, backdropType);
+
+    /// <summary>Expose the material constants so a test can try each one.</summary>
+    public const int BackdropMica = 2;
+    public const int BackdropAcrylic = 3;
+
+    /// <summary>True when DWM composition is on; without it no material can render.</summary>
+    public static bool IsCompositionEnabled()
+    {
+        try
+        {
+            return DwmIsCompositionEnabled(out bool enabled) == 0 && enabled;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    [DllImport("dwmapi.dll", SetLastError = false)]
+    private static extern int DwmIsCompositionEnabled([MarshalAs(UnmanagedType.Bool)] out bool pfEnabled);
+
+    /// <summary>
     /// Windows 11 22H2 build. DWMWA_SYSTEMBACKDROP_TYPE shipped with it; earlier
     /// builds used a different, undocumented attribute that no longer applies, so
     /// they are treated as unsupported and fall back to the translucent panels.

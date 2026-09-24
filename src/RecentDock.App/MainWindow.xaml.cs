@@ -253,6 +253,8 @@ public partial class MainWindow : Window
         // restores them.
         WindowResizer.Attach(this);
 
+        ApplyDropShadow(_settings.ShowDropShadow);
+
         bool backdrop = AcrylicBackdrop.Apply(this, _settings.UseAcrylicBackdrop, _settings.UseDarkTheme);
         if (!backdrop && _settings.UseAcrylicBackdrop)
         {
@@ -260,6 +262,33 @@ public partial class MainWindow : Window
             // appearance on their own, so this is informational only.
             DegradedText.Text = "系统不支持亚克力背景，已使用半透明面板";
         }
+    }
+
+    /// <summary>
+    /// Add or remove the drop shadow.
+    ///
+    /// Deliberately not in the XAML. A Border.Effect makes WPF render the border into
+    /// an intermediate surface, and in a chrome-less window that depends on the DWM
+    /// material showing through, that surface composites as an opaque black
+    /// rectangle - the material never appears, so the panel looks painted on black
+    /// and lowering opacity only reveals more black. Applying it from code keeps it
+    /// switchable per machine.
+    /// </summary>
+    private void ApplyDropShadow(bool enabled)
+    {
+        if (!enabled)
+        {
+            FrameBorder.Effect = null;
+            return;
+        }
+
+        FrameBorder.Effect = new System.Windows.Media.Effects.DropShadowEffect
+        {
+            BlurRadius = 20,
+            ShadowDepth = 0,
+            Opacity = 0.28,
+            Color = System.Windows.Media.Colors.Black,
+        };
     }
 
     /// <summary>Rows currently displayed.</summary>

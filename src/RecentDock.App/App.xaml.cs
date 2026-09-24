@@ -393,6 +393,41 @@ public partial class App : Application
             Layout(panel, 720, 560);
 
             Log("  MainWindow         : constructed, measured, row styles refreshed");
+
+            // Backdrop diagnosis. Without this, "the panel looks black" gives no clue
+            // whether the window is transparent, whether DWM supports the material, or
+            // whether the attribute call failed - all three look identical on screen.
+            try
+            {
+                panel.WindowStartupLocation = WindowStartupLocation.Manual;
+                panel.Left = -32000;
+                panel.Top = -32000;
+                panel.Show();
+                panel.UpdateLayout();
+
+                Log($"  backdrop diagnosis : {AcrylicBackdrop.Diagnose(panel)}");
+
+                // Try each material so the right one can be pinned down empirically
+                // rather than guessed at.
+                foreach ((string name, int type) in new[]
+                {
+                    ("mica   ", AcrylicBackdrop.BackdropMica),
+                    ("acrylic", AcrylicBackdrop.BackdropAcrylic),
+                })
+                {
+                    bool ok = AcrylicBackdrop.TrySetBackdrop(
+                        new System.Windows.Interop.WindowInteropHelper(panel).Handle,
+                        type);
+                    Log($"  backdrop {name}     : set={ok}");
+                }
+
+                panel.Hide();
+            }
+            catch (Exception ex)
+            {
+                Log($"  note: could not realise the panel for backdrop checks: {ex.GetType().Name}");
+            }
+
             panel.Close();
         }
         catch (Exception ex)
