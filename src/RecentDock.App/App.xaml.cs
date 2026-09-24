@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using RecentDock.Core;
 using RecentDock.Core.Interop;
+using RecentDock.Core.Storage;
 
 namespace RecentDock.App;
 
@@ -16,6 +17,8 @@ public partial class App : Application
 {
     private TrayIcon? _tray;
     private MainWindow? _window;
+    private SettingsWindow? _settingsWindow;
+    private UiSettings _settings = new();
 
     public App()
     {
@@ -59,8 +62,13 @@ public partial class App : Application
 
         DispatcherUnhandledException += (_, args) =>
         {
+            // Log before showing anything. A dialog is easy to dismiss and its text
+            // cannot be read back programmatically, which makes a crash report
+            // impossible to act on; the file survives.
+            string logPath = WriteCrashLog(args.Exception);
+
             MessageBox.Show(
-                args.Exception.ToString(),
+                args.Exception.ToString() + $"\n\n已记录到：\n{logPath}",
                 "RecentDock 发生未处理异常",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
@@ -85,6 +93,12 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Any(a => string.Equals(a, "--uitest", StringComparison.OrdinalIgnoreCase)))
+        {
+            RunUiSmokeTest();
+            return;
+        }
+
         // Single instance must be checked before any window or tray icon is created,
         // otherwise the duplicate would flash a panel and add a second tray icon
         // before exiting.
@@ -94,11 +108,21 @@ public partial class App : Application
             return;
         }
 
+        // Appearance must be applied before the first window is created, so the panel
+        // is never painted with the default palette and then corrected.
+        _settings = ConfigStore.Load().Sanitized(
+            (int)SystemParameters.VirtualScreenLeft,
+            (int)SystemParameters.VirtualScreenTop,
+            (int)SystemParameters.VirtualScreenWidth,
+            (int)SystemParameters.VirtualScreenHeight);
+        ThemeManager.Apply(_settings);
+
         CreateWindow();
 
         _tray = new TrayIcon();
         _tray.ToggleRequested += (_, _) => ToggleWindow();
-        _tray.SettingsRequested += (_, _) => OpenSettings();
+        _tray.SettingsRequested += (_, _) => ShowSettings();
+        _tray.WindowsSettingsRequested += (_, _) => OpenWindowsSettings();
         _tray.ExitRequested += (_, _) => ExitApplication();
         _tray.Initialize();
 
@@ -109,6 +133,8 @@ public partial class App : Application
     {
         _window = new MainWindow();
         _window.ScanCompleted += (_, count) => _tray?.UpdateState(_window.IsVisible, count);
+        _window.AppearanceSettingsRequested += (_, _) => ShowSettings();
+        _window.WindowsSettingsRequested += (_, _) => OpenWindowsSettings();
         _window.Closing += OnWindowClosing;
         _window.IsVisibleChanged += (_, _) => UpdateTrayState();
 
@@ -221,7 +247,8 @@ public partial class App : Application
         UpdateTrayState();
     }
 
-    private void OpenSettings()
+    /// <summary>Open the Windows page that carries the recent-items toggle.</summary>
+    private void OpenWindowsSettings()
     {
         try
         {
@@ -241,9 +268,214 @@ public partial class App : Application
         }
     }
 
+    /// <summary>
+    /// Show the appearance settings dialog.
+    ///
+    /// Only one instance is kept: reusing the window preserves focus and avoids
+    /// stacking duplicate dialogs from repeated tray clicks.
+    /// </summary>
+    private void ShowSettings()
+    {
+        if (_settingsWindow is not null)
+        {
+            _settingsWindow.Activate();
+            return;
+        }
+
+        _settingsWindow = new SettingsWindow(_settings);
+
+        // Persist on every change so a crash or a kill cannot lose the adjustment, and
+        // keep the in-memory copy in step for the next time the dialog opens.
+        _settingsWindow.SettingsChanged += (_, updated) =>
+        {
+            _settings = updated;
+            ConfigStore.Save(_settings);
+        };
+
+        _settingsWindow.Closed += (_, _) =>
+        {
+            _settingsWindow = null;
+
+            // Geometry is unaffected by appearance edits, but the panel needs a nudge
+            // so row styles are re-read from the newly written resources.
+            _window?.RefreshRowStyles();
+        };
+
+        // Owned by the panel when it is visible, so the dialog cannot end up behind it.
+        if (_window is { IsVisible: true })
+        {
+            _settingsWindow.Owner = _window;
+        }
+
+        _settingsWindow.Show();
+        _settingsWindow.Activate();
+    }
+
     private void UpdateTrayState()
     {
         _tray?.UpdateState(_window?.IsVisible == true, _window?.Items.Count ?? 0);
+    }
+
+    /// <summary>
+    /// Construct every window once, off-screen, and report any failure.
+    ///
+    /// Why this exists: a XAML error is a RUNTIME failure, not a compile error. The
+    /// "BasedOn cannot take a DynamicResource" mistake built cleanly, shipped, and
+    /// only surfaced as an unhandled-exception dialog when the panel tried to render.
+    /// A build that succeeds says nothing about whether the XAML parses.
+    ///
+    /// Windows are measured rather than shown, so this needs no interactive session
+    /// and leaves nothing on screen.
+    ///
+    /// Usage: RecentDock.exe --uitest
+    /// </summary>
+    private void RunUiSmokeTest()
+    {
+        int exitCode = 0;
+        var log = new System.Text.StringBuilder();
+
+        void Log(string text)
+        {
+            Console.WriteLine(text);
+            log.AppendLine(text);
+        }
+
+        Log("RecentDock UI smoke test");
+
+        UiSettings settings = ConfigStore.Load().Sanitized(
+            (int)SystemParameters.VirtualScreenLeft,
+            (int)SystemParameters.VirtualScreenTop,
+            (int)SystemParameters.VirtualScreenWidth,
+            (int)SystemParameters.VirtualScreenHeight);
+
+        try
+        {
+            ThemeManager.Apply(settings);
+            Log($"  theme applied      : opacity={settings.PanelOpacity:F2} font={settings.FontSize:F0} icon={settings.IconSize:F0}");
+        }
+        catch (Exception ex)
+        {
+            Log($"  FAIL applying theme: {ex.GetType().Name}: {ex.Message}");
+            exitCode = 1;
+        }
+
+        try
+        {
+            var panel = new MainWindow();
+
+            // Force the template and the item containers to materialise. Constructing
+            // the window alone does not parse the row DataTemplate - that happens on
+            // first render - so a layout pass is required to catch template errors.
+            Layout(panel, 720, 560);
+
+            // Exercise the path the settings dialog triggers, which rewrites the style
+            // resources and then rebuilds the containers.
+            panel.RefreshRowStyles();
+            Layout(panel, 720, 560);
+
+            Log("  MainWindow         : constructed, measured, row styles refreshed");
+            panel.Close();
+        }
+        catch (Exception ex)
+        {
+            Log($"  FAIL MainWindow    : {ex.GetType().Name}: {ex.Message}");
+            Log(ex.ToString());
+            exitCode = 1;
+        }
+
+        try
+        {
+            var dialog = new SettingsWindow(settings);
+            Layout(dialog, 420, 620);
+
+            Log("  SettingsWindow     : constructed and measured");
+            dialog.Close();
+        }
+        catch (Exception ex)
+        {
+            Log($"  FAIL SettingsWindow: {ex.GetType().Name}: {ex.Message}");
+            Log(ex.ToString());
+            exitCode = 1;
+        }
+
+        try
+        {
+            // The tray icon is the other runtime-only component; creating it proves the
+            // icon can be extracted from our own executable.
+            using var tray = new TrayIcon();
+            tray.Initialize();
+            Log("  TrayIcon           : initialised");
+        }
+        catch (Exception ex)
+        {
+            Log($"  FAIL TrayIcon      : {ex.GetType().Name}: {ex.Message}");
+            exitCode = 1;
+        }
+
+        Log("");
+        Log(exitCode == 0 ? "OK" : "FAILED");
+
+        string logPath = Path.Combine(Path.GetTempPath(), "RecentDock-uitest.txt");
+        try
+        {
+            File.WriteAllText(logPath, log.ToString(), new System.Text.UTF8Encoding(true));
+            Console.WriteLine($"log: {logPath}");
+        }
+        catch (Exception)
+        {
+            // Diagnostics only.
+        }
+
+        Environment.Exit(exitCode);
+    }
+
+    /// <summary>
+    /// Run a layout pass without showing the window, so template errors surface.
+    /// </summary>
+    private static void Layout(Window window, double width, double height)
+    {
+        window.Measure(new Size(width, height));
+        window.Arrange(new Rect(0, 0, width, height));
+        window.UpdateLayout();
+    }
+
+    /// <summary>
+    /// Write an unhandled exception to a file and return its path.
+    ///
+    /// The dialog alone is not enough: its text cannot be read back, so a crash
+    /// report has to be transcribed by hand. The file survives the dialog and works
+    /// even when the dialog cannot be shown at all.
+    /// </summary>
+    private static string WriteCrashLog(Exception exception)
+    {
+        string path = Path.Combine(Path.GetTempPath(), "RecentDock-crash.txt");
+
+        try
+        {
+            var report = new System.Text.StringBuilder();
+            report.AppendLine($"time      : {DateTimeOffset.Now:O}");
+            report.AppendLine($"version   : {typeof(App).Assembly.GetName().Version}");
+
+            try
+            {
+                report.AppendLine($"os        : {Environment.OSVersion.Version}");
+                report.AppendLine($"theme     : {ConfigStore.Load().UseDarkTheme switch { true => "dark", false => "light" }}");
+            }
+            catch (Exception)
+            {
+                // Diagnostics only.
+            }
+
+            report.AppendLine();
+            report.AppendLine(exception.ToString());
+
+            File.WriteAllText(path, report.ToString(), new System.Text.UTF8Encoding(true));
+            return path;
+        }
+        catch (Exception)
+        {
+            return "(无法写入日志)";
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)

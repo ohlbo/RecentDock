@@ -1,0 +1,171 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!--
+    ============================================================================
+    LIGHT translucent theme - white glass.
+    ============================================================================
+
+    Split out of App.xaml so these entries can be edited at runtime. A resource
+    defined inline in App.xaml can still be overwritten through
+    Application.Current.Resources, but keeping the palette in its own merged
+    dictionary makes the contract explicit: ThemeManager rewrites these exact keys
+    when the user moves the opacity slider, and everything bound to them updates
+    live.
+
+    The XAML palette is only half the appearance. The window itself is transparent
+    and the DWM paints its acrylic material behind the client area, so the
+    material's light/dark variant decides the base colour. That variant comes from
+    DWMWA_USE_IMMERSIVE_DARK_MODE in AcrylicBackdrop.Apply and is NOT taken from
+    here. A dark material under a light palette still renders as a black panel.
+
+    Alpha budget. These surfaces sit ON TOP of the material:
+      - too opaque -> the glass is invisible and it looks like a flat panel
+      - too clear  -> text loses contrast, especially on Windows 10 where there is
+                      no acrylic behind it at all
+    White tint tolerates lower opacity than a dark one for the same legibility,
+    because dark text on light glass keeps its contrast further down.
+
+      0xB3 (70%) content area  - lightest, lets the desktop read through
+      0xC0 (75%) header/footer  - a touch heavier, reads as window chrome
+      0xCC (80%) outer tint     - sets the overall depth
+
+    ThemeManager recalculates these three against the user's opacity preference, so
+    the values here are the BASELINE rather than the final ones.
+  -->
+
+  <SolidColorBrush x:Key="GlassTintBrush" Color="#CCFFFFFF" />
+  <SolidColorBrush x:Key="GlassHeaderBrush" Color="#C0FFFFFF" />
+  <SolidColorBrush x:Key="GlassSurfaceBrush" Color="#B3FFFFFF" />
+  <SolidColorBrush x:Key="GlassBorderBrush" Color="#59FFFFFF" />
+
+  <SolidColorBrush x:Key="PrimaryTextBrush" Color="#FF1C1C20" />
+  <SolidColorBrush x:Key="SecondaryTextBrush" Color="#FF5F6068" />
+  <SolidColorBrush x:Key="AccentBrush" Color="#FF2F6FD8" />
+  <SolidColorBrush x:Key="WarningBrush" Color="#FFB4651A" />
+
+  <!-- Row states darken rather than lighten, because the surface is light. -->
+  <SolidColorBrush x:Key="HoverBrush" Color="#14000000" />
+  <SolidColorBrush x:Key="SelectedBrush" Color="#332F6FD8" />
+
+  <!--
+    ============================================================================
+    Text styles
+    ============================================================================
+
+    Body text uses these instead of literal FontSize values so a single change
+    rescales the whole panel. ThemeManager rewrites FontSize on the styles below
+    when the user picks a text size; nothing else in the app needs to know.
+  -->
+
+  <Style x:Key="BodyTextStyle" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+  </Style>
+
+  <Style x:Key="TitleTextStyle" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+  </Style>
+
+  <!-- Row file name. -->
+  <Style x:Key="RowTitleTextStyle" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+
+  <!-- Row folder path line, relative time, status bar, count labels. -->
+  <Style x:Key="CaptionTextStyle" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+
+  <!--
+    Bare size for controls that cannot take a TextBlock style: buttons and the
+    checkbox in the status bar. ThemeManager keeps it in step with
+    CaptionTextStyle so everything labelled "caption" stays one size.
+  -->
+  <sys:Double x:Key="CaptionFontSize" xmlns:sys="clr-namespace:System;assembly=System.Runtime">11</sys:Double>
+
+  <!-- Row icon size. ThemeManager writes the user's preference here. -->
+  <sys:Double x:Key="RowIconSize" xmlns:sys="clr-namespace:System;assembly=System.Runtime">16</sys:Double>
+
+  <!-- Buttons: flat and translucent, distinguished by hover rather than a border. -->
+  <Style TargetType="Button">
+    <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+    <Setter Property="Background" Value="#14000000" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="10,4" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border x:Name="Root"
+                  Background="{TemplateBinding Background}"
+                  CornerRadius="4"
+                  Padding="{TemplateBinding Padding}">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Root" Property="Background" Value="#22000000" />
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+              <Setter TargetName="Root" Property="Background" Value="#38000000" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!--
+    The context menu is a separate popup with NO acrylic behind it, so it needs a
+    much more opaque fill than the panel: at panel alphas the desktop shows straight
+    through and the text becomes unreadable.
+  -->
+  <Style TargetType="ContextMenu">
+    <Setter Property="Background" Value="#F7F7F8FA" />
+    <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+    <Setter Property="BorderBrush" Value="#33000000" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ContextMenu">
+          <Border Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="6"
+                  Padding="4">
+            <StackPanel IsItemsHost="True" />
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style TargetType="MenuItem">
+    <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+    <Setter Property="Padding" Value="10,5" />
+    <Style.Triggers>
+      <Trigger Property="IsHighlighted" Value="True">
+        <Setter Property="Background" Value="#332F6FD8" />
+      </Trigger>
+    </Style.Triggers>
+  </Style>
+
+  <Style TargetType="Separator">
+    <Setter Property="Background" Value="#26000000" />
+    <Setter Property="Height" Value="1" />
+    <Setter Property="Margin" Value="4,3" />
+  </Style>
+
+  <Style TargetType="CheckBox">
+    <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+</ResourceDictionary>

@@ -102,6 +102,25 @@ public sealed record UiSettings
     /// </summary>
     public bool UseDarkTheme { get; init; }
 
+    /// <summary>
+    /// Panel opacity, 0.3 to 1.0. 1.0 is fully opaque; lower values let more of the
+    /// desktop (and the acrylic material) read through.
+    ///
+    /// This scales the BASELINE alphas in Theme.xaml rather than replacing them, so
+    /// the designed relationship between the three surfaces is preserved at every
+    /// setting instead of each one drifting independently.
+    /// </summary>
+    public double PanelOpacity { get; init; } = 1.0;
+
+    /// <summary>
+    /// Body text size in device-independent pixels. Drives the row name, the folder
+    /// line, the relative time and the status bar together.
+    /// </summary>
+    public double FontSize { get; init; } = 13;
+
+    /// <summary>Row icon size in device-independent pixels.</summary>
+    public double IconSize { get; init; } = 16;
+
     /// <summary>Start minimised to the tray.</summary>
     public bool StartHidden { get; init; }
 
@@ -169,6 +188,13 @@ public sealed record UiSettings
             WindowWidth = width,
             WindowHeight = height,
             MaxItems = Math.Clamp(MaxItems, 1, 500),
+
+            // Clamped rather than rejected: these come from sliders, so the only way
+            // to get an out-of-range value is a hand-edited config, and clamping is
+            // friendlier than silently ignoring the whole file.
+            PanelOpacity = Math.Clamp(PanelOpacity, 0.3, 1.0),
+            FontSize = Math.Clamp(FontSize, 10, 24),
+            IconSize = Math.Clamp(IconSize, 12, 48),
         };
     }
 }

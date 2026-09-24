@@ -14,6 +14,14 @@ global using MessageBox = System.Windows.MessageBox;
 // Same reason: ListViewItem exists in both WPF and WinForms namespaces.
 global using ListViewItem = System.Windows.Controls.ListViewItem;
 
+// And again for Color, which System.Drawing also defines. Every use in this project
+// means the WPF one.
+global using Color = System.Windows.Media.Color;
+
+// System.Drawing also defines Size and Point. WPF's are meant throughout.
+global using Size = System.Windows.Size;
+global using Point = System.Windows.Point;
+
 // Explicit because UseWindowsForms changes which implicit usings the SDK injects,
 // and System.IO stopped being available (same effect seen in RecentDock.Core).
 global using System.IO;

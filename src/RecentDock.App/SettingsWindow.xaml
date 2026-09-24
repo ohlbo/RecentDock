@@ -1,0 +1,136 @@
+<Window x:Class="RecentDock.App.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="RecentDock 设置"
+        Width="420" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="{DynamicResource GlassTintBrush}"
+        Foreground="{DynamicResource PrimaryTextBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI"
+        FontSize="13"
+        TextOptions.TextFormattingMode="Display"
+        UseLayoutRounding="True">
+
+  <!--
+    A dialog rather than an inline panel: the tray menu is the entry point, and a
+    separate window keeps the panel itself uncluttered. Changes apply live so the
+    effect is visible while dragging, which is the whole point of a slider.
+  -->
+  <Grid Margin="20,16,20,16">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <TextBlock Grid.Row="0"
+               Text="外观"
+               Style="{DynamicResource TitleTextStyle}"
+               Margin="0,0,0,14" />
+
+    <!-- ============================ opacity -->
+    <Grid Grid.Row="1" Margin="0,0,0,18">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <TextBlock Grid.Row="0" Grid.Column="0" Text="面板透明度" />
+      <TextBlock Grid.Row="0" Grid.Column="1"
+                 x:Name="OpacityValueText"
+                 Style="{DynamicResource CaptionTextStyle}"
+                 VerticalAlignment="Center" />
+
+      <Slider Grid.Row="1" Grid.ColumnSpan="2"
+              x:Name="OpacitySlider"
+              Minimum="0.3" Maximum="1.0"
+              SmallChange="0.05" LargeChange="0.1"
+              TickFrequency="0.1" IsSnapToTickEnabled="False"
+              Margin="0,6,0,0"
+              ValueChanged="OnOpacityChanged" />
+
+      <TextBlock Grid.Row="2" Grid.ColumnSpan="2"
+                 Text="向左更透（更能看到桌面），向右更实（文字更清楚）"
+                 Style="{DynamicResource CaptionTextStyle}"
+                 Margin="0,2,0,0" />
+    </Grid>
+
+    <!-- ============================ font size -->
+    <Grid Grid.Row="2" Margin="0,0,0,18">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <TextBlock Grid.Row="0" Grid.Column="0" Text="文字大小" />
+      <TextBlock Grid.Row="0" Grid.Column="1"
+                 x:Name="FontValueText"
+                 Style="{DynamicResource CaptionTextStyle}"
+                 VerticalAlignment="Center" />
+
+      <Slider Grid.Row="1" Grid.ColumnSpan="2"
+              x:Name="FontSlider"
+              Minimum="10" Maximum="24"
+              SmallChange="1" LargeChange="2"
+              TickFrequency="1" IsSnapToTickEnabled="True"
+              Margin="0,6,0,0"
+              ValueChanged="OnFontSizeChanged" />
+    </Grid>
+
+    <!-- ============================ icon size -->
+    <Grid Grid.Row="3" Margin="0,0,0,18">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <TextBlock Grid.Row="0" Grid.Column="0" Text="图标大小" />
+      <TextBlock Grid.Row="0" Grid.Column="1"
+                 x:Name="IconValueText"
+                 Style="{DynamicResource CaptionTextStyle}"
+                 VerticalAlignment="Center" />
+
+      <Slider Grid.Row="1" Grid.ColumnSpan="2"
+              x:Name="IconSlider"
+              Minimum="12" Maximum="48"
+              SmallChange="2" LargeChange="4"
+              TickFrequency="4" IsSnapToTickEnabled="True"
+              Margin="0,6,0,0"
+              ValueChanged="OnIconSizeChanged" />
+    </Grid>
+
+    <!-- ============================ live preview hint -->
+    <Border Grid.Row="4"
+            Background="#14000000"
+            CornerRadius="4"
+            Padding="10,8"
+            Margin="0,0,0,18">
+      <TextBlock Text="改动会立即生效，可以直接在面板上看到效果。"
+                 Style="{DynamicResource CaptionTextStyle}"
+                 TextWrapping="Wrap" />
+    </Border>
+
+    <!-- ============================ actions -->
+    <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right">
+      <Button Content="恢复默认" Click="OnResetClick" Padding="14,5" Margin="0,0,8,0" Cursor="Hand" />
+      <Button Content="关闭" Click="OnCloseClick" Padding="18,5" Cursor="Hand" IsDefault="True" />
+    </StackPanel>
+  </Grid>
+</Window>

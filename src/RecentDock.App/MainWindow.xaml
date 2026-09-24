@@ -62,19 +62,24 @@
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
 
           <StackPanel Grid.Column="0" VerticalAlignment="Center">
-            <TextBlock Text="最近打开" FontSize="14" FontWeight="SemiBold" />
-            <TextBlock Text="双击打开条目；右键查看更多操作"
-                       FontSize="11"
-                       Foreground="{StaticResource SecondaryTextBrush}" />
+            <TextBlock Text="最近打开" Style="{DynamicResource TitleTextStyle}" />
+            <TextBlock Text="双击打开条目；右键查看更多操作" Style="{DynamicResource CaptionTextStyle}" />
           </StackPanel>
 
-          <!-- IsHitTestVisibleInChrome is an attached property and must be set on
-               the element itself: with WindowChrome the buttons are otherwise
-               treated as caption area and never receive clicks. -->
           <Button Grid.Column="1"
+                  Content="外观"
+                  Click="OnAppearanceClick"
+                  Padding="12,5"
+                  Margin="0,0,6,0"
+                  Cursor="Hand"
+                  VerticalAlignment="Center"
+                  ToolTip="调整透明度、文字大小、图标大小" />
+
+          <Button Grid.Column="2"
                   Content="刷新"
                   Click="OnRefreshClick"
                   Padding="12,5"
@@ -82,13 +87,13 @@
                   Cursor="Hand"
                   VerticalAlignment="Center" />
 
-          <Button Grid.Column="2"
+          <Button Grid.Column="3"
                   Content="✕"
                   Click="OnCloseClick"
                   Width="30" Height="28"
                   Cursor="Hand"
                   VerticalAlignment="Center"
-                  ToolTip="关闭" />
+                  ToolTip="关闭（最小化到托盘）" />
         </Grid>
       </Border>
 
@@ -166,16 +171,28 @@
 
                 <Image Grid.Column="0"
                        Source="{Binding Icon}"
-                       Width="16" Height="16"
+                       Width="{DynamicResource RowIconSize}"
+                       Height="{DynamicResource RowIconSize}"
                        Margin="0,0,8,0"
                        VerticalAlignment="Center" />
 
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                  <TextBlock Text="{Binding DisplayName}"
-                             TextTrimming="CharacterEllipsis"
-                             FontWeight="SemiBold">
+                  <TextBlock Text="{Binding DisplayName}">
                     <TextBlock.Style>
-                      <Style TargetType="TextBlock">
+                      <!--
+                        StaticResource, NOT DynamicResource: Style.BasedOn is a plain
+                        CLR property, and WPF rejects a DynamicResourceExtension there
+                        with XamlParseException ("can only be set on a
+                        DependencyProperty of a DependencyObject"). A dynamic resource
+                        is only valid on dependency properties, which is why the
+                        Style setter below can be dynamic while BasedOn cannot.
+
+                        Text-size changes still reach these rows: RefreshRowStyles
+                        rebuilds the containers, which re-reads the style from the
+                        dictionary.
+                      -->
+                      <Style TargetType="TextBlock"
+                             BasedOn="{StaticResource RowTitleTextStyle}">
                         <Style.Triggers>
                           <!-- Dim rows whose target is gone rather than hiding
                                them: a silently vanishing entry is more confusing
@@ -189,21 +206,19 @@
                     </TextBlock.Style>
                   </TextBlock>
                   <TextBlock Text="{Binding FolderPath}"
-                             FontSize="11"
-                             TextTrimming="CharacterEllipsis"
-                             Foreground="{StaticResource SecondaryTextBrush}" />
+                             Style="{DynamicResource CaptionTextStyle}" />
                 </StackPanel>
 
                 <TextBlock Grid.Column="2"
                            Text="{Binding ValidityLabel}"
-                           FontSize="11"
+                           Style="{DynamicResource CaptionTextStyle}"
                            Margin="8,0"
                            VerticalAlignment="Center"
                            Foreground="{StaticResource WarningBrush}" />
 
                 <TextBlock Grid.Column="3"
                            Text="{Binding RelativeTime}"
-                           FontSize="11"
+                           Style="{DynamicResource CaptionTextStyle}"
                            MinWidth="66"
                            TextAlignment="Right"
                            VerticalAlignment="Center"
@@ -220,15 +235,14 @@
           <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420" Margin="24">
             <TextBlock x:Name="EmptyTitle"
                        Text="还没有记录"
-                       FontSize="15"
-                       FontWeight="SemiBold"
+                       Style="{DynamicResource TitleTextStyle}"
                        HorizontalAlignment="Center" />
             <TextBlock x:Name="EmptyDetail"
                        Text=""
+                       Style="{DynamicResource CaptionTextStyle}"
                        Margin="0,8,0,0"
                        TextWrapping="Wrap"
-                       TextAlignment="Center"
-                       Foreground="{StaticResource SecondaryTextBrush}" />
+                       TextAlignment="Center" />
             <Button x:Name="EmptyActionButton"
                     Content="打开设置"
                     Click="OnOpenSettingsClick"
@@ -257,27 +271,25 @@
           <TextBlock x:Name="StatusText"
                      Grid.Column="0"
                      Text="就绪"
-                     FontSize="11"
-                     VerticalAlignment="Center"
-                     Foreground="{StaticResource SecondaryTextBrush}" />
+                     Style="{DynamicResource CaptionTextStyle}"
+                     VerticalAlignment="Center" />
 
           <!-- Watcher degradation is reported here rather than in a dialog: the
                panel still works, only less promptly, so it must not interrupt. -->
           <TextBlock x:Name="DegradedText"
                      Grid.Column="1"
                      Text=""
-                     FontSize="11"
+                     Style="{DynamicResource CaptionTextStyle}"
+                     Foreground="{StaticResource WarningBrush}"
                      Margin="12,0"
                      VerticalAlignment="Center"
-                     TextAlignment="Right"
-                     TextTrimming="CharacterEllipsis"
-                     Foreground="{StaticResource WarningBrush}" />
+                     TextAlignment="Right" />
 
           <Button x:Name="CleanupButton"
                   Grid.Column="2"
                   Content="清理失效"
                   Click="OnCleanupClick"
-                  FontSize="11"
+                  FontSize="{DynamicResource CaptionFontSize}"
                   Padding="8,2"
                   Margin="0,0,10,0"
                   Cursor="Hand"
@@ -287,7 +299,7 @@
           <CheckBox x:Name="AutoStartCheck"
                     Grid.Column="3"
                     Content="开机自启"
-                    FontSize="11"
+                    FontSize="{DynamicResource CaptionFontSize}"
                     VerticalAlignment="Center"
                     Cursor="Hand"
                     Checked="OnAutoStartChanged"

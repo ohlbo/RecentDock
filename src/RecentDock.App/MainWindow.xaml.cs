@@ -188,6 +188,39 @@ public partial class MainWindow : Window
     /// <summary>Raised after each successful scan, with the number of rows shown.</summary>
     public event EventHandler<int>? ScanCompleted;
 
+    /// <summary>Raised when the user asks for the appearance settings dialog.</summary>
+    public event EventHandler? AppearanceSettingsRequested;
+
+    /// <summary>Raised when the user asks for the Windows recent-items setting.</summary>
+    public event EventHandler? WindowsSettingsRequested;
+
+    /// <summary>
+    /// Force the list to rebuild its row containers so they re-read the theme styles.
+    ///
+    /// Needed because these styles are applied with StaticResource, which resolves
+    /// once per container. ThemeManager rewrites the style objects, but an existing
+    /// container keeps the styles it captured at creation - so a text-size change
+    /// would only take effect on rows created afterwards.
+    ///
+    /// Rebuilding the ItemsSource is what actually forces regeneration. The row view
+    /// models are reused, so icons stay cached and scroll position is preserved as
+    /// closely as WPF allows.
+    /// </summary>
+    public void RefreshRowStyles()
+    {
+        IReadOnlyList<RecentItemViewModel> snapshot = Items.ToList();
+
+        ItemList.ItemsSource = null;
+        Items.Clear();
+
+        foreach (RecentItemViewModel row in snapshot)
+        {
+            Items.Add(row);
+        }
+
+        ItemList.ItemsSource = Items;
+    }
+
     public MainWindow()
     {
         InitializeComponent();
@@ -554,20 +587,25 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    /// <summary>
+    /// Open the appearance settings dialog. Emitted rather than handled here so the
+    /// window stays free of window-management concerns.
+    /// </summary>
+    private void OnAppearanceClick(object sender, RoutedEventArgs e)
+    {
+        AppearanceSettingsRequested?.Invoke(this, EventArgs.Empty);
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// Open the Windows page carrying the recent-items toggle. Kept separate from the
+    /// appearance dialog: this one is about data recording, the other about looks, and
+    /// mixing them would be confusing.
+    /// </summary>
     private void OnOpenSettingsClick(object sender, RoutedEventArgs e)
     {
-        try
-        {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = EnvironmentProbe.GetSettingsUri(),
-                UseShellExecute = true,
-            });
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = "无法打开设置：" + ex.Message;
-        }
+        WindowsSettingsRequested?.Invoke(this, EventArgs.Empty);
+        e.Handled = true;
     }
 
     /// <summary>

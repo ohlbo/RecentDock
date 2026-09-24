@@ -32,16 +32,22 @@ public sealed class TrayIcon : IDisposable
     /// <summary>Raised when the user picks Settings.</summary>
     public event EventHandler? SettingsRequested;
 
+    /// <summary>Raised when the user asks for the Windows recent-items setting.</summary>
+    public event EventHandler? WindowsSettingsRequested;
+
     public void Initialize()
     {
         _toggleItem = new Forms.ToolStripMenuItem("隐藏面板", null, (_, _) => ToggleRequested?.Invoke(this, EventArgs.Empty));
 
-        var settingsItem = new Forms.ToolStripMenuItem("设置", null, (_, _) => SettingsRequested?.Invoke(this, EventArgs.Empty));
+        var settingsItem = new Forms.ToolStripMenuItem("外观设置…", null, (_, _) => SettingsRequested?.Invoke(this, EventArgs.Empty));
+        var windowsSettingsItem = new Forms.ToolStripMenuItem("打开系统设置…", null, (_, _) => WindowsSettingsRequested?.Invoke(this, EventArgs.Empty));
         var exitItem = new Forms.ToolStripMenuItem("退出", null, (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty));
 
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add(_toggleItem);
+        menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add(settingsItem);
+        menu.Items.Add(windowsSettingsItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add(exitItem);
 
