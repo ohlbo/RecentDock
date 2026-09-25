@@ -66,6 +66,7 @@
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
 
           <TextBlock Grid.Column="0"
@@ -73,7 +74,17 @@
                      Style="{DynamicResource TitleTextStyle}"
                      VerticalAlignment="Center" />
 
-          <Button Grid.Column="1"
+          <TextBox Grid.Column="1"
+                   x:Name="SearchBox"
+                   Width="168"
+                   Height="28"
+                   Margin="8,0,8,0"
+                   Padding="8,4"
+                   VerticalContentAlignment="Center"
+                   TextChanged="OnSearchTextChanged"
+                   ToolTip="搜索名称或文件地址（Ctrl+F）" />
+
+          <Button Grid.Column="2"
                   Content="⚙"
                   Style="{DynamicResource HeaderButtonStyle}"
                   Click="OnAppearanceClick"
@@ -83,7 +94,7 @@
                   VerticalAlignment="Center"
                   ToolTip="外观与行为设置" />
 
-          <Button Grid.Column="2"
+          <Button Grid.Column="3"
                   Content="↻"
                   Style="{DynamicResource HeaderButtonStyle}"
                   Click="OnRefreshClick"
@@ -92,7 +103,7 @@
                   Cursor="Hand"
                   VerticalAlignment="Center" />
 
-          <Button Grid.Column="3"
+          <Button Grid.Column="4"
                   Content="✕"
                   Style="{DynamicResource HeaderButtonStyle}"
                   Click="OnCloseClick"
@@ -181,14 +192,16 @@
                   <ColumnDefinition Width="*" />
                   <ColumnDefinition Width="Auto" />
                   <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
                 <Grid.ContextMenu>
                   <ContextMenu>
-                    <MenuItem Header="打开" Click="OnOpenClick" />
+                    <MenuItem Header="打开" InputGestureText="Enter" Click="OnOpenClick" />
                     <MenuItem Header="打开所在位置" Click="OnOpenFolderClick" />
+                    <MenuItem Header="收藏置顶 / 取消收藏" InputGestureText="Ctrl+D" Click="OnTogglePinClick" />
                     <Separator />
-                    <MenuItem Header="从列表移除" Click="OnRemoveClick" />
+                    <MenuItem Header="从列表移除" InputGestureText="Delete" Click="OnRemoveClick" />
                   </ContextMenu>
                 </Grid.ContextMenu>
 
@@ -234,13 +247,21 @@
                 </StackPanel>
 
                 <TextBlock Grid.Column="2"
+                           Text="★"
+                           Visibility="{Binding PinnedVisibility}"
+                           Margin="8,0,2,0"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource AccentBrush}"
+                           ToolTip="已收藏置顶" />
+
+                <TextBlock Grid.Column="3"
                            Text="{Binding ValidityLabel}"
                            Style="{DynamicResource CaptionTextStyle}"
                            Margin="8,0"
                            VerticalAlignment="Center"
                            Foreground="{DynamicResource WarningBrush}" />
 
-                <TextBlock Grid.Column="3"
+                <TextBlock Grid.Column="4"
                            Text="{Binding RelativeTime}"
                            Style="{DynamicResource CaptionTextStyle}"
                            MinWidth="66"

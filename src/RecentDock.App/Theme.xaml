@@ -200,4 +200,14 @@
     <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
 
+  <Style TargetType="TextBox">
+    <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+    <Setter Property="Background" Value="#18FFFFFF" />
+    <Setter Property="BorderBrush" Value="#30000000" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CaretBrush" Value="{DynamicResource PrimaryTextBrush}" />
+    <Setter Property="SelectionBrush" Value="{DynamicResource SelectedBrush}" />
+    <Setter Property="FontSize" Value="{DynamicResource CaptionFontSize}" />
+  </Style>
+
 </ResourceDictionary>

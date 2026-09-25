@@ -48,6 +48,8 @@ public sealed class StorageTests : IDisposable
         Assert.False(settings.ShowMissingTargets);
         Assert.True(settings.ShowFilePath);
         Assert.True(settings.AlwaysOnTop);
+        Assert.True(settings.EnableEdgeSnap);
+        Assert.False(settings.EnableEdgeAutoHide);
         Assert.True(settings.UseAcrylicBackdrop);
     }
 
@@ -64,6 +66,8 @@ public sealed class StorageTests : IDisposable
             ShowMissingTargets = true,
             ShowFilePath = false,
             AlwaysOnTop = false,
+            EnableEdgeSnap = false,
+            EnableEdgeAutoHide = true,
             UseAcrylicBackdrop = false,
             StartHidden = true,
         };
@@ -94,6 +98,25 @@ public sealed class StorageTests : IDisposable
 
         Assert.False(File.Exists(AppPaths.ConfigFile + ".tmp"));
         Assert.Equal(8, ConfigStore.Load().MaxItems);
+    }
+
+    // ------------------------------------------------------------ favourites
+
+    [Fact]
+    public void Favorites_MissingFile_ReturnsEmpty()
+    {
+        Assert.Empty(FavoritesStore.Load());
+    }
+
+    [Fact]
+    public void Favorites_SaveThenLoad_IsCaseInsensitiveAndDistinct()
+    {
+        string first = @"C:\Work\Report.pdf";
+
+        Assert.True(FavoritesStore.Save(new[] { first, first.ToUpperInvariant(), "", "  " }));
+
+        Assert.Equal(new[] { first }, FavoritesStore.Load());
+        Assert.False(File.Exists(AppPaths.FavoritesFile + ".tmp"));
     }
 
     // ------------------------------------------------------------ sanitising

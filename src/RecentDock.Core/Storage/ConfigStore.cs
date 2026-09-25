@@ -44,6 +44,8 @@ public static class AppPaths
 
     public static string SnapshotFile => Path.Combine(StateDirectory, "snapshot.json");
 
+    public static string FavoritesFile => Path.Combine(StateDirectory, "favorites.json");
+
     /// <summary>
     /// Ensure the state directory exists. Returns false when it cannot be created,
     /// in which case callers degrade to in-memory defaults rather than failing.
@@ -112,6 +114,12 @@ public sealed record UiSettings
 
     /// <summary>Keep the panel above ordinary application windows.</summary>
     public bool AlwaysOnTop { get; init; } = true;
+
+    /// <summary>Snap the panel to a nearby screen edge after dragging.</summary>
+    public bool EnableEdgeSnap { get; init; } = true;
+
+    /// <summary>Collapse a left/right docked panel to a small reveal strip.</summary>
+    public bool EnableEdgeAutoHide { get; init; }
 
     /// <summary>
     /// Use the DWM system backdrop (acrylic/mica) for a translucent window. Falls
@@ -291,6 +299,54 @@ public sealed record UiSettings
             FontSize = Math.Clamp(FontSize, 10, 24),
             IconSize = Math.Clamp(IconSize, 12, 48),
         };
+    }
+}
+
+/// <summary>Persists the user's locally pinned targets independently of Windows history.</summary>
+public static class FavoritesStore
+{
+    private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
+
+    public static IReadOnlyList<string> Load()
+    {
+        try
+        {
+            if (!File.Exists(AppPaths.FavoritesFile))
+            {
+                return Array.Empty<string>();
+            }
+
+            string[]? values = JsonSerializer.Deserialize<string[]>(
+                File.ReadAllText(AppPaths.FavoritesFile), Options);
+
+            return values?
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray()
+                ?? Array.Empty<string>();
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    public static bool Save(IEnumerable<string> paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+
+        if (!AppPaths.TryEnsureDirectory())
+        {
+            return false;
+        }
+
+        string[] values = paths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return AtomicFile.WriteJson(AppPaths.FavoritesFile, values, Options);
     }
 }
 

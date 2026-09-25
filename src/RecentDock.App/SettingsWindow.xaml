@@ -45,6 +45,8 @@
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
     <TextBlock Grid.Row="0"
@@ -165,6 +167,22 @@
               Unchecked="OnAlwaysOnTopChanged" />
 
     <CheckBox Grid.Row="6"
+              x:Name="EdgeSnapCheckBox"
+              Content="靠近屏幕边缘时自动吸附"
+              Margin="0,0,0,12"
+              Cursor="Hand"
+              Checked="OnEdgeBehaviorChanged"
+              Unchecked="OnEdgeBehaviorChanged" />
+
+    <CheckBox Grid.Row="7"
+              x:Name="EdgeAutoHideCheckBox"
+              Content="吸附后自动隐藏（移入边缘恢复）"
+              Margin="0,0,0,12"
+              Cursor="Hand"
+              Checked="OnEdgeBehaviorChanged"
+              Unchecked="OnEdgeBehaviorChanged" />
+
+    <CheckBox Grid.Row="8"
               x:Name="AutoStartCheckBox"
               Content="开机自启动"
               Margin="0,0,0,18"
@@ -173,7 +191,7 @@
               Unchecked="OnAutoStartChanged" />
 
     <!-- ============================ live preview hint -->
-    <Border Grid.Row="7"
+    <Border Grid.Row="9"
             Background="#14000000"
             CornerRadius="8"
             Padding="12,10"
@@ -184,7 +202,7 @@
     </Border>
 
     <!-- ============================ actions -->
-    <StackPanel Grid.Row="8" Orientation="Horizontal" HorizontalAlignment="Right">
+    <StackPanel Grid.Row="10" Orientation="Horizontal" HorizontalAlignment="Right">
       <Button Content="恢复默认" Click="OnResetClick" Padding="14,5" Margin="0,0,8,0" Cursor="Hand" />
       <Button Content="关闭" Click="OnCloseClick" Padding="18,5" Cursor="Hand" IsDefault="True" />
     </StackPanel>

@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Data;
 using System.Windows.Threading;
 using RecentDock.Core;
 using RecentDock.Core.Interop;
@@ -25,8 +26,9 @@ namespace RecentDock.App;
 public sealed class RecentItemViewModel : INotifyPropertyChanged
 {
     private readonly DateTimeOffset _lastAccess;
+    private bool _isPinned;
 
-    public RecentItemViewModel(RecentItem item)
+    public RecentItemViewModel(RecentItem item, bool isPinned = false)
     {
         DisplayName = item.DisplayName;
         TargetPath = item.TargetPath;
@@ -63,6 +65,7 @@ public sealed class RecentItemViewModel : INotifyPropertyChanged
         Icon = ShellIconProvider.GetIcon(extension, item.IsDirectory, item.Validity == ItemValidity.Valid);
 
         TypeLabel = item.IsDirectory ? "文件夹" : "文件";
+        _isPinned = isPinned;
     }
 
     public string DisplayName { get; }
@@ -80,6 +83,22 @@ public sealed class RecentItemViewModel : INotifyPropertyChanged
     public string TypeLabel { get; }
 
     public ImageSource? Icon { get; }
+
+    public bool IsPinned => _isPinned;
+
+    public Visibility PinnedVisibility => _isPinned ? Visibility.Visible : Visibility.Collapsed;
+
+    public void UpdatePinned(bool isPinned)
+    {
+        if (_isPinned == isPinned)
+        {
+            return;
+        }
+
+        _isPinned = isPinned;
+        OnPropertyChanged(nameof(IsPinned));
+        OnPropertyChanged(nameof(PinnedVisibility));
+    }
 
     /// <summary>
     /// Update validity in place.
@@ -174,6 +193,15 @@ public sealed class RecentItemViewModel : INotifyPropertyChanged
 /// </summary>
 public partial class MainWindow : Window
 {
+    private enum DockEdge
+    {
+        None,
+        Left,
+        Right,
+        Top,
+        Bottom,
+    }
+
     [Flags]
     private enum ResizeEdge
     {
@@ -185,14 +213,22 @@ public partial class MainWindow : Window
     }
 
     private const double ResizeGrip = 7;
+    private const double EdgeSnapDistance = 24;
+    private const double AutoHideRevealWidth = 6;
 
     private readonly RecentScanner _scanner = new();
     private readonly DispatcherTimer _relativeTimeTimer;
+    private readonly DispatcherTimer _autoHideTimer;
+    private readonly HashSet<string> _pinnedPaths = new(FavoritesStore.Load(), StringComparer.OrdinalIgnoreCase);
     private RecentWatcher? _watcher;
     private bool _busy;
     private ResizeEdge _activeResizeEdge;
     private Point _resizeStartPointer;
     private Rect _resizeStartBounds;
+    private ICollectionView? _itemsView;
+    private DockEdge _dockedEdge;
+    private bool _isAutoHidden;
+    private Rect _expandedDockBounds;
 
     /// <summary>Settings as loaded, updated on close.</summary>
     private UiSettings _settings = new();
@@ -234,6 +270,7 @@ public partial class MainWindow : Window
         }
 
         ItemList.ItemsSource = Items;
+        ConfigureItemsView();
     }
 
     /// <summary>
@@ -250,6 +287,15 @@ public partial class MainWindow : Window
         _settings = settings;
         ThemeManager.Apply(settings);
         Topmost = settings.AlwaysOnTop;
+        if ((!settings.EnableEdgeSnap || !settings.EnableEdgeAutoHide) && _isAutoHidden)
+        {
+            RestoreFromAutoHide();
+        }
+
+        if (!settings.EnableEdgeSnap)
+        {
+            _dockedEdge = DockEdge.None;
+        }
         // The window itself stays fully opaque so text and icons remain crisp. Its
         // background is per-pixel transparent; ThemeManager changes only the white
         // panel surfaces drawn inside it.
@@ -281,7 +327,20 @@ public partial class MainWindow : Window
             }
         };
 
+        _autoHideTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(650),
+        };
+        _autoHideTimer.Tick += (_, _) =>
+        {
+            _autoHideTimer.Stop();
+            HideAtDockedEdge();
+        };
+
         Loaded += OnLoaded;
+        PreviewKeyDown += OnWindowPreviewKeyDown;
+        MouseEnter += (_, _) => RestoreFromAutoHide();
+        MouseLeave += (_, _) => ScheduleAutoHide();
         PreviewMouseMove += OnWindowPreviewMouseMove;
         PreviewMouseLeftButtonDown += OnWindowPreviewMouseLeftButtonDown;
         PreviewMouseLeftButtonUp += OnWindowPreviewMouseLeftButtonUp;
@@ -302,6 +361,7 @@ public partial class MainWindow : Window
 
     private void OnWindowPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        RestoreFromAutoHide();
         ResizeEdge edge = HitTestResizeEdge(e.GetPosition(this));
         if (edge == ResizeEdge.None)
         {
@@ -309,6 +369,7 @@ public partial class MainWindow : Window
         }
 
         _activeResizeEdge = edge;
+        _dockedEdge = DockEdge.None;
         _resizeStartPointer = GetPointerInScreenDips(e);
         _resizeStartBounds = new Rect(Left, Top, ActualWidth, ActualHeight);
         CaptureMouse();
@@ -493,6 +554,7 @@ public partial class MainWindow : Window
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         ItemList.ItemsSource = Items;
+        ConfigureItemsView();
         _relativeTimeTimer.Start();
 
         // Geometry, resize hook and backdrop all need a window handle, so they are
@@ -519,6 +581,163 @@ public partial class MainWindow : Window
         _watcher.Start();
 
         _ = RefreshAsync();
+    }
+
+    private void ConfigureItemsView()
+    {
+        _itemsView = CollectionViewSource.GetDefaultView(Items);
+        _itemsView.Filter = MatchesSearch;
+        _itemsView.Refresh();
+    }
+
+    private bool MatchesSearch(object value)
+    {
+        if (value is not RecentItemViewModel item)
+        {
+            return false;
+        }
+
+        string query = SearchBox.Text.Trim();
+        return query.Length == 0
+            || item.DisplayName.Contains(query, StringComparison.CurrentCultureIgnoreCase)
+            || item.TargetPath.Contains(query, StringComparison.CurrentCultureIgnoreCase);
+    }
+
+    private void OnSearchTextChanged(object sender, TextChangedEventArgs e)
+    {
+        _itemsView?.Refresh();
+        UpdateSearchState();
+    }
+
+    private void UpdateSearchState()
+    {
+        string query = SearchBox.Text.Trim();
+        if (query.Length > 0 && _itemsView?.IsEmpty == true)
+        {
+            EmptyTitle.Text = "没有匹配项";
+            EmptyDetail.Text = $"名称或地址中没有找到“{query}”";
+            EmptyActionButton.Visibility = Visibility.Collapsed;
+            EmptyState.Visibility = Visibility.Visible;
+            StatusText.Text = "未找到匹配项";
+        }
+        else if (Items.Count > 0)
+        {
+            EmptyState.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void OnWindowPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        bool control = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
+
+        if (control && e.Key == Key.F)
+        {
+            SearchBox.Focus();
+            SearchBox.SelectAll();
+            e.Handled = true;
+            return;
+        }
+
+        if (control && e.Key == Key.R)
+        {
+            _ = RefreshAsync();
+            e.Handled = true;
+            return;
+        }
+
+        if (control && e.Key == Key.D && ItemList.SelectedItem is RecentItemViewModel favorite)
+        {
+            TogglePin(favorite);
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Escape)
+        {
+            if (SearchBox.Text.Length > 0 || SearchBox.IsKeyboardFocusWithin)
+            {
+                SearchBox.Clear();
+                ItemList.Focus();
+            }
+            else
+            {
+                Close();
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Down && SearchBox.IsKeyboardFocusWithin)
+        {
+            SelectFirstVisibleItem();
+            e.Handled = true;
+            return;
+        }
+
+        if (!SearchBox.IsKeyboardFocusWithin && e.Key is Key.Up or Key.Down)
+        {
+            MoveSelection(e.Key == Key.Down ? 1 : -1);
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Enter)
+        {
+            RecentItemViewModel? selected = ItemList.SelectedItem as RecentItemViewModel;
+            if (selected is null)
+            {
+                SelectFirstVisibleItem();
+                selected = ItemList.SelectedItem as RecentItemViewModel;
+            }
+
+            if (selected is not null)
+            {
+                OpenTarget(selected);
+                e.Handled = true;
+            }
+
+            return;
+        }
+
+        if (e.Key == Key.Delete && !SearchBox.IsKeyboardFocusWithin
+            && ItemList.SelectedItem is RecentItemViewModel item)
+        {
+            RemoveItem(item);
+            e.Handled = true;
+        }
+    }
+
+    private void SelectFirstVisibleItem()
+    {
+        if (_itemsView is null || _itemsView.IsEmpty)
+        {
+            return;
+        }
+
+        ItemList.SelectedItem = _itemsView.Cast<RecentItemViewModel>().FirstOrDefault();
+        ItemList.Focus();
+    }
+
+    private void MoveSelection(int offset)
+    {
+        if (_itemsView is null)
+        {
+            return;
+        }
+
+        List<RecentItemViewModel> visible = _itemsView.Cast<RecentItemViewModel>().ToList();
+        if (visible.Count == 0)
+        {
+            return;
+        }
+
+        int current = ItemList.SelectedItem is RecentItemViewModel selected
+            ? visible.IndexOf(selected)
+            : -1;
+        int next = Math.Clamp(current + offset, 0, visible.Count - 1);
+        ItemList.SelectedItem = visible[next];
+        ItemList.ScrollIntoView(visible[next]);
     }
 
     /// <summary>Load the cached snapshot, tolerating any failure.</summary>
@@ -568,7 +787,7 @@ public partial class MainWindow : Window
         {
             // RestoreBounds is used because a maximised or hidden window reports
             // meaningless Left/Top; RestoreBounds is where it will come back to.
-            Rect bounds = RestoreBounds;
+            Rect bounds = _isAutoHidden ? _expandedDockBounds : RestoreBounds;
 
             _settings = _settings with
             {
@@ -615,6 +834,7 @@ public partial class MainWindow : Window
         // touch a disposed dispatcher.
         _watcher?.Dispose();
         _relativeTimeTimer.Stop();
+        _autoHideTimer.Stop();
         EndManualResize();
         base.OnClosed(e);
     }
@@ -692,9 +912,17 @@ public partial class MainWindow : Window
             existing[row.TargetPath] = row;
         }
 
-        var desired = new List<RecentItemViewModel>(incoming.Count);
-        foreach (RecentItem item in incoming)
+        IReadOnlyList<RecentItem> orderedIncoming = incoming
+            .Select((item, index) => (item, index))
+            .OrderByDescending(entry => _pinnedPaths.Contains(entry.item.TargetPath))
+            .ThenBy(entry => entry.index)
+            .Select(entry => entry.item)
+            .ToList();
+
+        var desired = new List<RecentItemViewModel>(orderedIncoming.Count);
+        foreach (RecentItem item in orderedIncoming)
         {
+            bool isPinned = _pinnedPaths.Contains(item.TargetPath);
             if (existing.TryGetValue(item.TargetPath, out RecentItemViewModel? row))
             {
                 // Reuse the row for its cached icon and live bindings, but refresh what
@@ -702,11 +930,12 @@ public partial class MainWindow : Window
                 // Unreachable forever, so every entry showed as unreachable after a
                 // restart.
                 row.UpdateValidity(item.Validity);
+                row.UpdatePinned(isPinned);
                 desired.Add(row);
             }
             else
             {
-                desired.Add(new RecentItemViewModel(item));
+                desired.Add(new RecentItemViewModel(item, isPinned));
             }
         }
 
@@ -733,6 +962,9 @@ public partial class MainWindow : Window
                 Items.Move(current, target);
             }
         }
+
+        _itemsView?.Refresh();
+        UpdateSearchState();
     }
 
     private void ApplyPanelState(RecentScanResult result)
@@ -905,6 +1137,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        RemoveItem(item);
+    }
+
+    private void RemoveItem(RecentItemViewModel item)
+    {
+
         MessageBoxResult answer = MessageBox.Show(
             $"从最近列表中移除这条记录？\n\n{item.DisplayName}\n\n"
             + "会删除该文件在 Windows 最近列表中的记录（若存在多条则一并删除）。"
@@ -928,6 +1166,48 @@ public partial class MainWindow : Window
         {
             StatusText.Text = "移除失败：" + ex.Message;
         }
+    }
+
+    private void OnTogglePinClick(object sender, RoutedEventArgs e)
+    {
+        if (ResolveContextMenuItem(sender) is { } item)
+        {
+            TogglePin(item);
+        }
+    }
+
+    private void TogglePin(RecentItemViewModel item)
+    {
+        bool pinned;
+        if (_pinnedPaths.Contains(item.TargetPath))
+        {
+            _pinnedPaths.Remove(item.TargetPath);
+            pinned = false;
+        }
+        else
+        {
+            _pinnedPaths.Add(item.TargetPath);
+            pinned = true;
+        }
+
+        item.UpdatePinned(pinned);
+        FavoritesStore.Save(_pinnedPaths);
+
+        int current = Items.IndexOf(item);
+        if (current >= 0)
+        {
+            if (pinned)
+            {
+                Items.Move(current, 0);
+            }
+            else
+            {
+                int pinnedCount = Items.Count(row => row.IsPinned);
+                Items.Move(current, Math.Min(pinnedCount, Items.Count - 1));
+            }
+        }
+
+        StatusText.Text = pinned ? $"已收藏：{item.DisplayName}" : $"已取消收藏：{item.DisplayName}";
     }
 
     /// <summary>Delete every record whose target no longer exists.</summary>
@@ -1044,6 +1324,8 @@ public partial class MainWindow : Window
 
     private void OnDragAreaMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        RestoreFromAutoHide();
+
         if (e.ClickCount == 2)
         {
             // Double-clicking the header toggles between compact and tall.
@@ -1059,5 +1341,117 @@ public partial class MainWindow : Window
         {
             // DragMove throws if the button was already released; harmless.
         }
+
+        SnapToNearestEdge();
+    }
+
+    private Rect CurrentMonitorWorkArea()
+    {
+        Point deviceCenter = PointToScreen(new Point(ActualWidth / 2, ActualHeight / 2));
+        System.Windows.Forms.Screen screen = System.Windows.Forms.Screen.FromPoint(
+            new System.Drawing.Point((int)Math.Round(deviceCenter.X), (int)Math.Round(deviceCenter.Y)));
+
+        System.Drawing.Rectangle pixels = screen.WorkingArea;
+        if (PresentationSource.FromVisual(this)?.CompositionTarget is not { } target)
+        {
+            return new Rect(pixels.Left, pixels.Top, pixels.Width, pixels.Height);
+        }
+
+        Point topLeft = target.TransformFromDevice.Transform(new Point(pixels.Left, pixels.Top));
+        Point bottomRight = target.TransformFromDevice.Transform(new Point(pixels.Right, pixels.Bottom));
+        return new Rect(topLeft, bottomRight);
+    }
+
+    private void SnapToNearestEdge()
+    {
+        _dockedEdge = DockEdge.None;
+        if (!_settings.EnableEdgeSnap)
+        {
+            return;
+        }
+
+        Rect work = CurrentMonitorWorkArea();
+        double right = Left + ActualWidth;
+        double bottom = Top + ActualHeight;
+        var candidates = new (DockEdge Edge, double Distance)[]
+        {
+            (DockEdge.Left, Math.Abs(Left - work.Left)),
+            (DockEdge.Right, Math.Abs(right - work.Right)),
+            (DockEdge.Top, Math.Abs(Top - work.Top)),
+            (DockEdge.Bottom, Math.Abs(bottom - work.Bottom)),
+        };
+
+        (DockEdge edge, double distance) = candidates.OrderBy(candidate => candidate.Distance).First();
+        if (distance > EdgeSnapDistance)
+        {
+            return;
+        }
+
+        _dockedEdge = edge;
+        switch (edge)
+        {
+            case DockEdge.Left:
+                Left = work.Left;
+                Top = Clamp(Top, work.Top, work.Bottom - ActualHeight);
+                break;
+            case DockEdge.Right:
+                Left = work.Right - ActualWidth;
+                Top = Clamp(Top, work.Top, work.Bottom - ActualHeight);
+                break;
+            case DockEdge.Top:
+                Top = work.Top;
+                Left = Clamp(Left, work.Left, work.Right - ActualWidth);
+                break;
+            case DockEdge.Bottom:
+                Top = work.Bottom - ActualHeight;
+                Left = Clamp(Left, work.Left, work.Right - ActualWidth);
+                break;
+        }
+
+        _expandedDockBounds = new Rect(Left, Top, ActualWidth, ActualHeight);
+    }
+
+    private static double Clamp(double value, double minimum, double maximum)
+        => maximum < minimum ? minimum : Math.Clamp(value, minimum, maximum);
+
+    private void ScheduleAutoHide()
+    {
+        if (_settings.EnableEdgeSnap
+            && _settings.EnableEdgeAutoHide
+            && (_dockedEdge == DockEdge.Left || _dockedEdge == DockEdge.Right)
+            && !OwnedWindows.Cast<Window>().Any(window => window.IsVisible))
+        {
+            _autoHideTimer.Stop();
+            _autoHideTimer.Start();
+        }
+    }
+
+    private void HideAtDockedEdge()
+    {
+        if (_isAutoHidden || IsMouseOver || !_settings.EnableEdgeAutoHide
+            || (_dockedEdge != DockEdge.Left && _dockedEdge != DockEdge.Right))
+        {
+            return;
+        }
+
+        _expandedDockBounds = new Rect(Left, Top, ActualWidth, ActualHeight);
+        Rect work = CurrentMonitorWorkArea();
+        Left = _dockedEdge == DockEdge.Left
+            ? work.Left - ActualWidth + AutoHideRevealWidth
+            : work.Right - AutoHideRevealWidth;
+        _isAutoHidden = true;
+    }
+
+    private void RestoreFromAutoHide()
+    {
+        _autoHideTimer.Stop();
+        if (!_isAutoHidden)
+        {
+            return;
+        }
+
+        Left = _expandedDockBounds.Left;
+        Top = _expandedDockBounds.Top;
+        _isAutoHidden = false;
     }
 }

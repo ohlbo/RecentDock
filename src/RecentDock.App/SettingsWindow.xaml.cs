@@ -41,6 +41,8 @@ public partial class SettingsWindow : Window
         IconSlider.Value = current.IconSize;
         ShowPathCheckBox.IsChecked = current.ShowFilePath;
         AlwaysOnTopCheckBox.IsChecked = current.AlwaysOnTop;
+        EdgeSnapCheckBox.IsChecked = current.EnableEdgeSnap;
+        EdgeAutoHideCheckBox.IsChecked = current.EnableEdgeAutoHide;
         AutoStartCheckBox.IsChecked = AutoStart.IsEnabled();
 
         UpdateValueLabels();
@@ -111,6 +113,24 @@ public partial class SettingsWindow : Window
         Publish();
     }
 
+    private void OnEdgeBehaviorChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        // Auto-hide only makes sense when snapping can establish an edge.
+        if (sender == EdgeSnapCheckBox && EdgeSnapCheckBox.IsChecked != true)
+        {
+            _loading = true;
+            EdgeAutoHideCheckBox.IsChecked = false;
+            _loading = false;
+        }
+
+        Publish();
+    }
+
     private void OnAutoStartChanged(object sender, RoutedEventArgs e)
     {
         if (_loading)
@@ -151,6 +171,8 @@ public partial class SettingsWindow : Window
             IconSize = Math.Round(IconSlider.Value),
             ShowFilePath = ShowPathCheckBox.IsChecked == true,
             AlwaysOnTop = AlwaysOnTopCheckBox.IsChecked == true,
+            EnableEdgeSnap = EdgeSnapCheckBox.IsChecked == true,
+            EnableEdgeAutoHide = EdgeAutoHideCheckBox.IsChecked == true,
         };
 
         ThemeManager.Apply(Result);
@@ -177,6 +199,8 @@ public partial class SettingsWindow : Window
         IconSlider.Value = defaults.IconSize;
         ShowPathCheckBox.IsChecked = defaults.ShowFilePath;
         AlwaysOnTopCheckBox.IsChecked = defaults.AlwaysOnTop;
+        EdgeSnapCheckBox.IsChecked = defaults.EnableEdgeSnap;
+        EdgeAutoHideCheckBox.IsChecked = defaults.EnableEdgeAutoHide;
         _loading = false;
 
         UpdateValueLabels();
