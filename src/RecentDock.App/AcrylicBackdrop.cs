@@ -1,29 +1,28 @@
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Media;
+using RecentDock.Core.Storage;
 
 namespace RecentDock.App;
 
 /// <summary>
-/// Applies the Windows 11 system backdrop (acrylic / mica) so the panel is
-/// translucent rather than a painted dark rectangle.
+/// Applies a translucent backdrop to the panel.
 ///
-/// Why the system backdrop instead of a WPF transparency trick:
+/// Two independent implementations are kept because they do not work equally well on
+/// every machine, and only one of them could be verified from the outside:
 ///
-///   * AllowsTransparency="True" forces WPF onto a software rendering path and
-///     composes the window itself, which BOTH hurts scrolling performance and
-///     prevents the DWM material from showing through. It is the obvious approach
-///     and the wrong one.
-///   * WindowStyle="None" WITHOUT AllowsTransparency keeps hardware rendering, and
-///     the DWM paints the material behind a transparent client area.
+///   Dwm          DWMWA_SYSTEMBACKDROP_TYPE. The modern, documented route. On the
+///                machine this was developed against it reports success for every
+///                attribute and produces no visible material at all, so "returns
+///                S_OK" is not evidence that anything rendered.
+///   Accent       SetWindowCompositionAttribute with ACCENT_ENABLE_ACRYLICBLURBEHIND.
+///                The undocumented but widely used route, and what most WPF acrylic
+///                implementations actually rely on. It also carries its own tint, so
+///                it does not depend on DWM picking a light or dark variant.
 ///
-/// Consequence: the window must remove WindowChrome (its GlassFrameThickness makes
-/// the client area opaque) and instead rely on DWM for the rounded corners, with
-/// resizing supplied by <see cref="WindowResizer"/>.
-///
-/// Every call is best-effort. On Windows 10, or when composition is disabled, the
-/// attributes fail and the XAML's semi-transparent panels alone provide the
-/// appearance - degraded, never broken.
+/// Because the failure mode is identical either way - a panel that looks painted on
+/// black - the choice is exposed as a setting rather than guessed at.
 /// </summary>
 public static class AcrylicBackdrop
 {
@@ -33,57 +32,208 @@ public static class AcrylicBackdrop
     /// <summary>DWMWA_WINDOW_CORNER_PREFERENCE (Windows 11).</summary>
     private const int DwmwaWindowCornerPreference = 33;
 
-    /// <summary>DWMWA_SYSTEMBACKDROP_TYPE (Windows 11 22H2+).</summary>
-    private const int DwmwaSystemBackdropType = 38;
-
     /// <summary>DWMWA_BORDER_COLOR (Windows 11).</summary>
     private const int DwmwaBorderColor = 34;
+
+    /// <summary>DWMWA_SYSTEMBACKDROP_TYPE (Windows 11 22H2+).</summary>
+    private const int DwmwaSystemBackdropType = 38;
 
     /// <summary>DWMWA_NCRENDERING_POLICY (Windows Vista+).</summary>
     private const int DwmwaNcRenderingPolicy = 2;
 
-    /// <summary>
-    /// DWMNCRP_DISABLED. Stops DWM rendering the non-client area at all.
-    ///
-    /// Setting DWMWA_BORDER_COLOR to "none" only removes the border COLOUR; DWM still
-    /// renders the rest of the non-client frame, which on Windows 11 includes a 1px
-    /// frame and a soft shadow around the whole window rect. That is the second, larger
-    /// box that remains visible around a chrome-less window even after the border
-    /// colour is suppressed.
-    /// </summary>
+    /// <summary>DWMNCRP_DISABLED; stops DWM rendering the non-client frame.</summary>
     private const int DwmNcRenderingDisabled = 1;
 
     /// <summary>
-    /// DWMWA_COLOR_NONE. Tells DWM not to draw its own border at all.
-    ///
-    /// Windows 11 draws a 1px frame plus an outer outline around every top-level
-    /// window, including chrome-less ones. It is visible as a second, slightly larger
-    /// box around the panel - which reads as "a Windows box behind my panel" and
-    /// ruins the glass edge, since the panel's own rounded corner is drawn inside it.
+    /// DWMWA_COLOR_NONE. Tells DWM not to draw its own border colour.
     /// </summary>
     private const int DwmwaColorNone = unchecked((int)0xFFFFFFFE);
 
     private const int DwmWindowCornerPreferenceRound = 2;
 
-    /// <summary>DWMSBT_TRANSIENTWINDOW: the acrylic-like material suited to panels.</summary>
-    private const int DwmsbtTransientWindow = 3;
+    /// <summary>DWMSBT_MAINWINDOW: mica, the material used by normal app windows.</summary>
+    public const int BackdropMica = 2;
+
+    /// <summary>DWMSBT_TRANSIENTWINDOW: acrylic, more translucent.</summary>
+    public const int BackdropAcrylic = 3;
 
     /// <summary>
-    /// Diagnose why a backdrop is or is not visible.
+    /// Windows 11 22H2. DWMWA_SYSTEMBACKDROP_TYPE shipped with it; earlier builds are
+    /// treated as unsupported and fall back to the accent route.
+    /// </summary>
+    private const int Windows11_22H2Build = 22621;
+
+    /// <summary>Apply the configured backdrop method.</summary>
+    public static bool Apply(Window window, UiSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        ArgumentNullException.ThrowIfNull(settings);
+
+        if (!settings.UseAcrylicBackdrop)
+        {
+            return false;
+        }
+
+        // Background="Transparent" in XAML is not sufficient for an HWND-backed
+        // WPF window. Unless the HwndSource composition target is transparent too,
+        // alpha in the visual tree is blended against an opaque black client area.
+        // That is the exact failure mode where the opacity slider reveals more black
+        // instead of more desktop.
+        PrepareTransparentClient(window, settings.BackdropMethod == BackdropMethodKind.Dwm);
+
+        return settings.BackdropMethod switch
+        {
+            BackdropMethodKind.Accent => ApplyAccent(window, settings),
+            _ => ApplyDwm(window, settings),
+        };
+    }
+
+    private static void PrepareTransparentClient(Window window, bool extendDwmFrame)
+    {
+        if (PresentationSource.FromVisual(window) is not HwndSource source)
+        {
+            return;
+        }
+
+        source.CompositionTarget.BackgroundColor = Colors.Transparent;
+
+        if (!extendDwmFrame)
+        {
+            return;
+        }
+
+        // A negative margin extends the DWM surface through the whole client area.
+        // Without it the backdrop can be accepted by DWM but remain confined to the
+        // (now hidden) non-client frame, leaving WPF to composite over black.
+        var margins = new Margins(-1);
+        try
+        {
+            DwmExtendFrameIntoClientArea(source.Handle, ref margins);
+        }
+        catch (Exception)
+        {
+            // The Accent path remains available on machines where this API fails.
+        }
+    }
+
+    /// <summary>
+    /// Modern route: ask DWM for a system backdrop material.
+    /// </summary>
+    private static bool ApplyDwm(Window window, UiSettings settings)
+    {
+        if (!IsSystemBackdropSupported())
+        {
+            return false;
+        }
+
+        IntPtr handle = new WindowInteropHelper(window).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        SetAttribute(handle, DwmwaWindowCornerPreference, DwmWindowCornerPreferenceRound);
+
+        // The frame and the material pull in opposite directions: DWM appears to need
+        // the framish window styles to composite a backdrop at all, so the frame is
+        // suppressed through attributes instead of by clearing styles.
+        SetAttribute(handle, DwmwaBorderColor, DwmwaColorNone);
+
+        if (settings.SuppressNonClientFrame)
+        {
+            SetAttribute(handle, DwmwaNcRenderingPolicy, DwmNcRenderingDisabled);
+        }
+
+        SetAttribute(handle, DwmwaUseImmersiveDarkMode, settings.UseDarkTheme ? 1 : 0);
+
+        int material = settings.BackdropMaterial switch
+        {
+            BackdropMaterialKind.Mica => BackdropMica,
+            _ => BackdropAcrylic,
+        };
+
+        return SetAttribute(handle, DwmwaSystemBackdropType, material);
+    }
+
+    /// <summary>
+    /// Legacy route: SetWindowCompositionAttribute with an acrylic blur.
     ///
-    /// Three independent things must all hold, and a failure in any one produces the
-    /// same symptom - a panel that looks like it is painted on black:
+    /// Carries its own tint colour, which is the useful difference - the material's
+    /// lightness no longer depends on DWM resolving the app's theme.
+    /// </summary>
+    private static bool ApplyAccent(Window window, UiSettings settings)
+    {
+        IntPtr handle = new WindowInteropHelper(window).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        SetAttribute(handle, DwmwaWindowCornerPreference, DwmWindowCornerPreferenceRound);
+        SetAttribute(handle, DwmwaBorderColor, DwmwaColorNone);
+
+        if (settings.SuppressNonClientFrame)
+        {
+            SetAttribute(handle, DwmwaNcRenderingPolicy, DwmNcRenderingDisabled);
+        }
+
+        // ABGR, and the alpha controls the material's tint strength. This stays
+        // independent from the user-facing panel opacity: MainWindow.Opacity is the
+        // final compositor-level control and therefore produces a predictable result
+        // on every supported backdrop implementation.
+        byte tintAlpha = (byte)Math.Clamp(settings.AccentTintOpacity * 255.0, 0, 255);
+
+        uint gradientColor = settings.UseDarkTheme
+            ? (uint)((tintAlpha << 24) | (0x1F << 16) | (0x1B << 8) | 0x1A)   // AABBGGRR
+            : (uint)((tintAlpha << 24) | (0xFF << 16) | (0xFF << 8) | 0xFF);
+
+        var accent = new AccentPolicy
+        {
+            AccentState = AccentState.EnableAcrylicBlurBehind,
+            AccentFlags = 2,
+            GradientColor = gradientColor,
+            AnimationId = 0,
+        };
+
+        int size = Marshal.SizeOf<AccentPolicy>();
+        IntPtr buffer = Marshal.AllocHGlobal(size);
+
+        try
+        {
+            Marshal.StructureToPtr(accent, buffer, false);
+
+            var data = new WindowCompositionAttributeData
+            {
+                Attribute = WindowCompositionAttribute.AccentPolicy,
+                Data = buffer,
+                SizeOfData = size,
+            };
+
+            return SetWindowCompositionAttribute(handle, ref data);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    /// <summary>
+    /// Report why a backdrop is or is not visible.
     ///
-    ///   1. The window's client area must actually be transparent. WPF falls back to
-    ///      software rendering in some environments, and a software-rendered window is
-    ///      composited with an opaque black client area, so the material behind it can
-    ///      never show.
-    ///   2. DWMSBT_* support must be present (Windows 11 22H2+).
-    ///   3. DwmSetWindowAttribute must actually succeed - the call returns a failure
-    ///      HRESULT rather than throwing.
+    /// Three independent things must hold, and a failure in any one looks identical on
+    /// screen:
     ///
-    /// Reporting all three at once is what turns "it looks black" into an actionable
-    /// cause.
+    ///   1. The window's client area must be transparent. A software-rendered window is
+    ///      composited with an opaque black client area, so no material can show.
+    ///   2. DWMSBT_* support must be present.
+    ///   3. The attribute calls must succeed.
+    ///
+    /// Note the limit of this: all three can pass while nothing renders, which is
+    /// exactly what happened here. Treat it as a filter, not as proof.
     /// </summary>
     public static string Diagnose(Window window)
     {
@@ -100,7 +250,6 @@ public static class AcrylicBackdrop
             parts.Add("renderTier=?");
         }
 
-        parts.Add($"hwAccel={System.Windows.Media.RenderCapability.IsPixelShaderVersionSupported(2, 0)}");
         parts.Add($"dwmComposition={IsCompositionEnabled()}");
         parts.Add($"win11_22H2+={IsSystemBackdropSupported()}");
         parts.Add($"windowBg={(window.Background is null ? "null" : window.Background.ToString())}");
@@ -110,10 +259,9 @@ public static class AcrylicBackdrop
 
         if (handle != IntPtr.Zero)
         {
-            parts.Add($"backdropAttr={TrySetBackdrop(handle, DwmsbtTransientWindow)}");
+            parts.Add($"backdropAttr={TrySetBackdrop(handle, BackdropAcrylic)}");
             parts.Add($"cornerAttr={SetAttribute(handle, DwmwaWindowCornerPreference, DwmWindowCornerPreferenceRound)}");
             parts.Add($"borderColorAttr={SetAttribute(handle, DwmwaBorderColor, DwmwaColorNone)}");
-            parts.Add($"ncRenderingAttr={SetAttribute(handle, DwmwaNcRenderingPolicy, DwmNcRenderingDisabled)}");
         }
 
         return string.Join(", ", parts);
@@ -123,33 +271,22 @@ public static class AcrylicBackdrop
     public static bool TrySetBackdrop(IntPtr handle, int backdropType)
         => handle != IntPtr.Zero && SetAttribute(handle, DwmwaSystemBackdropType, backdropType);
 
-    /// <summary>Expose the material constants so a test can try each one.</summary>
-    public const int BackdropMica = 2;
-    public const int BackdropAcrylic = 3;
+    /// <summary>Force the material's light or dark variant, for A/B comparison.</summary>
+    public static bool TrySetDarkMode(IntPtr handle, bool dark)
+        => handle != IntPtr.Zero && SetAttribute(handle, DwmwaUseImmersiveDarkMode, dark ? 1 : 0);
 
-    /// <summary>True when DWM composition is on; without it no material can render.</summary>
-    public static bool IsCompositionEnabled()
-    {
-        try
-        {
-            return DwmIsCompositionEnabled(out bool enabled) == 0 && enabled;
-        }
-        catch (Exception)
-        {
-            return false;
-        }
-    }
-
-    [DllImport("dwmapi.dll", SetLastError = false)]
-    private static extern int DwmIsCompositionEnabled([MarshalAs(UnmanagedType.Bool)] out bool pfEnabled);
+    /// <summary>Turn non-client rendering on or off, for A/B comparison.</summary>
+    public static bool TrySetNcRendering(IntPtr handle, bool enabled)
+        => handle != IntPtr.Zero
+           && SetAttribute(handle, DwmwaNcRenderingPolicy, enabled ? 2 : DwmNcRenderingDisabled);
 
     /// <summary>
-    /// Report the window styles that make Windows treat a window as framed.
+    /// Report the window styles that decide whether Windows treats the window as
+    /// framed.
     ///
-    /// WS_CAPTION and WS_THICKFRAME are the two bits that matter. Even with
-    /// WindowStyle="None", WPF adds WS_THICKFRAME for a resizable window, and DWM uses
-    /// those bits to decide whether to render a frame - so they can explain a border
-    /// that survives every DWMWA_* setting.
+    /// WS_CAPTION and WS_THICKFRAME are the two bits that matter. WPF adds
+    /// WS_THICKFRAME for a resizable window even with WindowStyle="None", and DWM
+    /// consults those bits when deciding whether to render a frame.
     /// </summary>
     public static string DescribeWindowStyles(Window window)
     {
@@ -178,21 +315,11 @@ public static class AcrylicBackdrop
     }
 
     /// <summary>
-    /// Strip the window styles that make Windows treat the window as framed.
+    /// Clear the frame-ish window styles.
     ///
-    /// This is the piece that actually removes the system border, and it took a
-    /// measurement to find: every DWMWA_* attribute can be set successfully and the
-    /// frame still survives, because DWM decides whether to draw a frame from the
-    /// window STYLE bits, not from those attributes.
-    ///
-    /// Measured on a chrome-less WPF window: CAPTION=False, THICKFRAME=True,
-    /// EX_WINDOWEDGE=True. WS_THICKFRAME is added by WPF for a resizable window even
-    /// with WindowStyle="None", and WS_EX_WINDOWEDGE adds a raised edge on top.
-    /// WindowChrome would normally clear them, and this window deliberately does not
-    /// use WindowChrome, so nothing did.
-    ///
-    /// Resizing is unaffected: it is implemented by WindowResizer through
-    /// WM_NCHITTEST, which does not depend on these styles.
+    /// This removes the system frame, but it is OFF by default: clearing WS_THICKFRAME
+    /// also appeared to stop DWM compositing any backdrop material, which is why the
+    /// frame is normally suppressed through DWMWA_* attributes instead.
     /// </summary>
     public static void RemoveFrameStyles(Window window)
     {
@@ -221,8 +348,7 @@ public static class AcrylicBackdrop
         SetWindowLongPtr(handle, GWL_STYLE, new IntPtr(newStyle));
         SetWindowLongPtr(handle, GWL_EXSTYLE, new IntPtr(newExStyle));
 
-        // Style changes only take effect after the frame has been recalculated;
-        // without this the window can keep painting the old frame until it is resized.
+        // Style changes only take effect after the frame has been recalculated.
         SetWindowPos(
             handle,
             IntPtr.Zero,
@@ -230,99 +356,26 @@ public static class AcrylicBackdrop
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     }
 
-    private const uint SWP_NOSIZE = 0x0001;
-    private const uint SWP_NOMOVE = 0x0002;
-    private const uint SWP_NOZORDER = 0x0004;
-    private const uint SWP_NOACTIVATE = 0x0010;
-    private const uint SWP_FRAMECHANGED = 0x0020;
-
-    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = false)]
-    private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
-
-    [DllImport("user32.dll", SetLastError = false)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetWindowPos(
-        IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
-
-    private const int GWL_STYLE = -16;
-    private const int GWL_EXSTYLE = -20;
-
-    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = false)]
-    private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
-
-    /// <summary>
-    /// Windows 11 22H2 build. DWMWA_SYSTEMBACKDROP_TYPE shipped with it; earlier
-    /// builds used a different, undocumented attribute that no longer applies, so
-    /// they are treated as unsupported and fall back to the translucent panels.
-    /// </summary>
-    private const int Windows11_22H2Build = 22621;
-
-    /// <summary>
-    /// Apply the backdrop to a window. Must be called after the window has a handle.
-    /// </summary>
-    /// <param name="window">Target window.</param>
-    /// <param name="enable">False leaves the window untouched, for users who prefer a solid panel.</param>
-    /// <returns>
-    /// True when a system backdrop was applied. False means the caller is relying on
-    /// the XAML panels alone, which is a normal outcome on Windows 10.
-    /// </returns>
-    /// <param name="darkTheme">
-    /// Selects the material's light or dark variant.
-    ///
-    /// This is NOT cosmetic and it is not optional: the DWM acrylic material derives
-    /// its own colours from this flag, so asking for a dark material makes the surface
-    /// behind the client area genuinely black no matter how light the XAML panels are.
-    /// An early version hard-coded dark mode here, which is why a light theme still
-    /// rendered as black.
-    /// </param>
-    public static bool Apply(Window window, bool enable, bool darkTheme)
+    /// <summary>True when DWM composition is on; without it no material can render.</summary>
+    public static bool IsCompositionEnabled()
     {
-        ArgumentNullException.ThrowIfNull(window);
-
-        if (!enable || !IsSystemBackdropSupported())
+        try
+        {
+            return DwmIsCompositionEnabled(out bool enabled) == 0 && enabled;
+        }
+        catch (Exception)
         {
             return false;
         }
-
-        IntPtr handle = new WindowInteropHelper(window).Handle;
-        if (handle == IntPtr.Zero)
-        {
-            return false;
-        }
-
-        // Rounded corners. Cosmetic, and it succeeds even on builds that lack the
-        // backdrop attribute below.
-        SetAttribute(handle, DwmwaWindowCornerPreference, DwmWindowCornerPreferenceRound);
-
-        // Remove the system frame. Two attributes are needed, because they suppress
-        // different parts of it:
-        //
-        //   DWMWA_NCRENDERING_POLICY = DISABLED  stops DWM rendering the non-client
-        //                                        area, which is what draws the 1px
-        //                                        frame plus the soft window shadow.
-        //   DWMWA_BORDER_COLOR = NONE            removes the border colour on top of
-        //                                        that.
-        //
-        // Only setting the border colour was not enough: the frame and shadow stayed.
-        // The panel draws its own hairline (GlassBorderBrush), so nothing is lost.
-        SetAttribute(handle, DwmwaNcRenderingPolicy, DwmNcRenderingDisabled);
-        SetAttribute(handle, DwmwaBorderColor, DwmwaColorNone);
-
-        // Immersive dark mode drives the material's palette. 0 = light material.
-        SetAttribute(handle, DwmwaUseImmersiveDarkMode, darkTheme ? 1 : 0);
-
-        return SetAttribute(handle, DwmwaSystemBackdropType, DwmsbtTransientWindow);
     }
 
-    /// <summary>
-    /// True on Windows 11 22H2 or later, where DWMWA_SYSTEMBACKDROP_TYPE exists.
-    /// </summary>
+    /// <summary>True on Windows 11 22H2 or later.</summary>
     public static bool IsSystemBackdropSupported()
     {
         try
         {
-            // Environment.OSVersion's Major/Minor report 10.0 for Windows 11, so the
-            // build number is the only usable signal.
+            // Environment.OSVersion reports 10.0 for Windows 11, so the build number is
+            // the only usable signal.
             Version version = Environment.OSVersion.Version;
             return version.Major > 10 || (version.Major == 10 && version.Build >= Windows11_22H2Build);
         }
@@ -344,26 +397,102 @@ public static class AcrylicBackdrop
     {
         try
         {
-            int hr = DwmSetWindowAttribute(handle, attribute, ref value, sizeof(int));
-            return hr == 0;
+            return DwmSetWindowAttribute(handle, attribute, ref value, sizeof(int)) == 0;
         }
         catch (Exception)
         {
-            // Older Windows builds or a DWM that is not running.
             return false;
         }
     }
 
+    private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_NOZORDER = 0x0004;
+    private const uint SWP_NOACTIVATE = 0x0010;
+    private const uint SWP_FRAMECHANGED = 0x0020;
+
+    private const int GWL_STYLE = -16;
+    private const int GWL_EXSTYLE = -20;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct AccentPolicy
+    {
+        public AccentState AccentState;
+        public int AccentFlags;
+        public uint GradientColor;
+        public int AnimationId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Margins
+    {
+        public Margins(int value)
+        {
+            Left = value;
+            Right = value;
+            Top = value;
+            Bottom = value;
+        }
+
+        public int Left;
+        public int Right;
+        public int Top;
+        public int Bottom;
+    }
+
+    private enum AccentState
+    {
+        Disabled = 0,
+        EnableBlurBehind = 3,
+        EnableAcrylicBlurBehind = 4,
+    }
+
+    private enum WindowCompositionAttribute
+    {
+        AccentPolicy = 19,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowCompositionAttributeData
+    {
+        public WindowCompositionAttribute Attribute;
+        public IntPtr Data;
+        public int SizeOfData;
+    }
+
+    [DllImport("user32.dll", SetLastError = false)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowCompositionAttribute(
+        IntPtr hwnd, ref WindowCompositionAttributeData data);
+
     [DllImport("dwmapi.dll", SetLastError = false)]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
-}
 
+    [DllImport("dwmapi.dll", SetLastError = false)]
+    private static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref Margins margins);
+
+    [DllImport("dwmapi.dll", SetLastError = false)]
+    private static extern int DwmIsCompositionEnabled([MarshalAs(UnmanagedType.Bool)] out bool pfEnabled);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = false)]
+    private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = false)]
+    private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    [DllImport("user32.dll", SetLastError = false)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(
+        IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+}
 /// <summary>
 /// Window dragging and edge resizing for a chrome-less window.
 ///
-/// Needed because WindowChrome was removed so the DWM backdrop can show: with no
-/// chrome and no WindowStyle, nothing provides resize borders. This restores them
-/// with the standard WM_NCHITTEST contract, which is what Windows itself uses.
+/// Needed because WindowChrome is not used (it made the client area opaque and hid the
+/// backdrop material), so nothing provides resize borders. This restores them with the
+/// standard WM_NCHITTEST contract, which is what Windows itself uses - and it keeps
+/// working even when WS_THICKFRAME has been cleared, because the hit test result is
+/// what Windows acts on.
 /// </summary>
 public static class WindowResizer
 {

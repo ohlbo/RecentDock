@@ -62,6 +62,29 @@ public static class AppPaths
     }
 }
 
+/// <summary>Which API provides the translucent background.</summary>
+public enum BackdropMethodKind
+{
+    /// <summary>DWMWA_SYSTEMBACKDROP_TYPE. Modern and documented.</summary>
+    Dwm = 0,
+
+    /// <summary>
+    /// SetWindowCompositionAttribute acrylic. Undocumented but widely used, and it
+    /// carries its own tint so it does not depend on DWM resolving a theme.
+    /// </summary>
+    Accent = 1,
+}
+
+/// <summary>DWM system backdrop material.</summary>
+public enum BackdropMaterialKind
+{
+    /// <summary>DWMSBT_MAINWINDOW. Denser, like a normal app window.</summary>
+    Mica = 0,
+
+    /// <summary>DWMSBT_TRANSIENTWINDOW. More translucent.</summary>
+    Acrylic = 1,
+}
+
 /// <summary>User-facing settings that survive a restart.</summary>
 public sealed record UiSettings
 {
@@ -83,6 +106,12 @@ public sealed record UiSettings
     /// unless the user is specifically cleaning up.
     /// </summary>
     public bool ShowMissingTargets { get; init; }
+
+    /// <summary>Show the parent folder below each file name.</summary>
+    public bool ShowFilePath { get; init; } = true;
+
+    /// <summary>Keep the panel above ordinary application windows.</summary>
+    public bool AlwaysOnTop { get; init; } = true;
 
     /// <summary>
     /// Use the DWM system backdrop (acrylic/mica) for a translucent window. Falls
@@ -135,6 +164,57 @@ public sealed record UiSettings
     /// correctly it is a nice touch, and this way it can be verified per machine.
     /// </summary>
     public bool ShowDropShadow { get; init; }
+
+    /// <summary>
+    /// Paint the panel with an OPAQUE background instead of translucent glass.
+    ///
+    /// A diagnostic switch, not a style option. It exists because "the panel looks
+    /// black" has two possible causes that look identical on screen:
+    ///
+    ///   1. the DWM material is rendering dark, or
+    ///   2. the XAML layer itself is drawing dark, with the material irrelevant.
+    ///
+    /// Setting this true removes the material from the equation entirely: the panel
+    /// becomes a flat opaque surface, so if it STILL looks black the cause is the XAML
+    /// (or something above it), and if it turns solid white the cause is the material.
+    /// One run settles a question that several rounds of attribute inspection did not.
+    /// </summary>
+    public bool OpaquePanel { get; init; }
+
+    /// <summary>
+    /// Keep the window styles that DWM needs in order to render the system backdrop.
+    ///
+    /// True by default, and the default matters: clearing WS_THICKFRAME removes the
+    /// system frame, but it also appears to stop DWM rendering the acrylic/mica
+    /// material at all - the panel then falls back to the app's own layers composited
+    /// over black, which is exactly the "everything behind is black" symptom.
+    ///
+    /// Measured: with the styles cleared, eight different material configurations
+    /// (mica/acrylic x dark/light x NC on/off) all sampled identically, proving the
+    /// material was not involved. So the frame removal costs the material, and the
+    /// frame has to be suppressed a different way.
+    /// </summary>
+    public bool KeepFrameStylesForBackdrop { get; init; }
+
+    /// <summary>Which implementation produces the translucent background.</summary>
+    public BackdropMethodKind BackdropMethod { get; init; } = BackdropMethodKind.Accent;
+
+    /// <summary>Which DWM material to request, when <see cref="BackdropMethod"/> is Dwm.</summary>
+    public BackdropMaterialKind BackdropMaterial { get; init; } = BackdropMaterialKind.Acrylic;
+
+    /// <summary>
+    /// Tint strength for the Accent method, 0..1. Ignored by the DWM method, which
+    /// takes its colours from the system material.
+    /// </summary>
+    public double AccentTintOpacity { get; init; } = 0.45;
+
+    /// <summary>
+    /// Suppress DWM's non-client rendering.
+    ///
+    /// Removes the system frame, but it is suspect: with it disabled the material
+    /// appeared not to composite at all, so it is a switch rather than a default.
+    /// </summary>
+    public bool SuppressNonClientFrame { get; init; }
 
     /// <summary>Start minimised to the tray.</summary>
     public bool StartHidden { get; init; }

@@ -54,6 +54,10 @@
   <SolidColorBrush x:Key="GlassHeaderBrush" Color="#C0FFFFFF" po:Freeze="False" />
   <SolidColorBrush x:Key="GlassSurfaceBrush" Color="#B3FFFFFF" po:Freeze="False" />
   <SolidColorBrush x:Key="GlassBorderBrush" Color="#59FFFFFF" po:Freeze="False" />
+  <!-- Ordinary secondary windows do not have a compositor backdrop behind them.
+       Their root surface must therefore be opaque or its alpha blends with the
+       HWND's black backing store. -->
+  <SolidColorBrush x:Key="DialogSurfaceBrush" Color="#FFF7F7F9" po:Freeze="False" />
 
   <SolidColorBrush x:Key="PrimaryTextBrush" Color="#FF1C1C20" po:Freeze="False" />
   <SolidColorBrush x:Key="SecondaryTextBrush" Color="#FF5F6068" po:Freeze="False" />
@@ -136,6 +140,18 @@
         </ControlTemplate>
       </Setter.Value>
     </Setter>
+  </Style>
+
+  <!-- Compact title-bar actions. The glyph remains legible at every user-selected
+       body text size and avoids three heavy text buttons dominating the header. -->
+  <Style x:Key="HeaderButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+    <Setter Property="Width" Value="28" />
+    <Setter Property="Height" Value="28" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="FontFamily" Value="Segoe UI Symbol" />
+    <Setter Property="FontSize" Value="15" />
+    <Setter Property="FontWeight" Value="Normal" />
+    <Setter Property="ToolTipService.InitialShowDelay" Value="300" />
   </Style>
 
   <!--

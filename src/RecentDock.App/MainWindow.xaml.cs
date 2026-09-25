@@ -9,6 +9,9 @@ using System.Windows.Threading;
 using RecentDock.Core;
 using RecentDock.Core.Interop;
 using RecentDock.Core.Storage;
+using Cursor = System.Windows.Input.Cursor;
+using Cursors = System.Windows.Input.Cursors;
+using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 
 namespace RecentDock.App;
 
@@ -171,16 +174,28 @@ public sealed class RecentItemViewModel : INotifyPropertyChanged
 /// </summary>
 public partial class MainWindow : Window
 {
+    [Flags]
+    private enum ResizeEdge
+    {
+        None = 0,
+        Left = 1,
+        Top = 2,
+        Right = 4,
+        Bottom = 8,
+    }
+
+    private const double ResizeGrip = 7;
+
     private readonly RecentScanner _scanner = new();
     private readonly DispatcherTimer _relativeTimeTimer;
     private RecentWatcher? _watcher;
     private bool _busy;
+    private ResizeEdge _activeResizeEdge;
+    private Point _resizeStartPointer;
+    private Rect _resizeStartBounds;
 
     /// <summary>Settings as loaded, updated on close.</summary>
     private UiSettings _settings = new();
-
-    /// <summary>Guards event handlers while the UI is being initialised from state.</summary>
-    private bool _initializing;
 
     /// <summary>Rows whose target no longer exists, used to drive the cleanup affordance.</summary>
     private int _missingCount;
@@ -221,6 +236,34 @@ public partial class MainWindow : Window
         ItemList.ItemsSource = Items;
     }
 
+    /// <summary>
+    /// Apply settings edited in the live appearance window.
+    ///
+    /// ThemeManager updates WPF resources, while this method reapplies the native
+    /// backdrop. Both layers contribute to the final opacity, so omitting the second
+    /// half makes the slider move without producing a visible change.
+    /// </summary>
+    public void ApplyAppearanceSettings(UiSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        _settings = settings;
+        ThemeManager.Apply(settings);
+        Topmost = settings.AlwaysOnTop;
+        // The window itself stays fully opaque so text and icons remain crisp. Its
+        // background is per-pixel transparent; ThemeManager changes only the white
+        // panel surfaces drawn inside it.
+        Opacity = 1.0;
+        ApplyDropShadow(settings.ShowDropShadow);
+
+        // AllowsTransparency uses a layered HWND. A native Accent/DWM backdrop behind
+        // that HWND becomes an opaque white or black backing surface, defeating the
+        // per-pixel transparency. The transparent XAML surface is the backdrop here.
+        DegradedText.Text = string.Empty;
+
+        RefreshRowStyles();
+    }
+
     public MainWindow()
     {
         InitializeComponent();
@@ -239,6 +282,143 @@ public partial class MainWindow : Window
         };
 
         Loaded += OnLoaded;
+        PreviewMouseMove += OnWindowPreviewMouseMove;
+        PreviewMouseLeftButtonDown += OnWindowPreviewMouseLeftButtonDown;
+        PreviewMouseLeftButtonUp += OnWindowPreviewMouseLeftButtonUp;
+        LostMouseCapture += OnWindowLostMouseCapture;
+    }
+
+    private void OnWindowPreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_activeResizeEdge != ResizeEdge.None)
+        {
+            ResizeFromPointer(GetPointerInScreenDips(e));
+            e.Handled = true;
+            return;
+        }
+
+        Cursor = CursorFor(HitTestResizeEdge(e.GetPosition(this)));
+    }
+
+    private void OnWindowPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        ResizeEdge edge = HitTestResizeEdge(e.GetPosition(this));
+        if (edge == ResizeEdge.None)
+        {
+            return;
+        }
+
+        _activeResizeEdge = edge;
+        _resizeStartPointer = GetPointerInScreenDips(e);
+        _resizeStartBounds = new Rect(Left, Top, ActualWidth, ActualHeight);
+        CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void OnWindowPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_activeResizeEdge == ResizeEdge.None)
+        {
+            return;
+        }
+
+        EndManualResize();
+        e.Handled = true;
+    }
+
+    private void OnWindowLostMouseCapture(object sender, MouseEventArgs e)
+        => _activeResizeEdge = ResizeEdge.None;
+
+    private ResizeEdge HitTestResizeEdge(Point point)
+    {
+        ResizeEdge edge = ResizeEdge.None;
+
+        if (point.X <= ResizeGrip)
+        {
+            edge |= ResizeEdge.Left;
+        }
+        else if (point.X >= ActualWidth - ResizeGrip)
+        {
+            edge |= ResizeEdge.Right;
+        }
+
+        if (point.Y <= ResizeGrip)
+        {
+            edge |= ResizeEdge.Top;
+        }
+        else if (point.Y >= ActualHeight - ResizeGrip)
+        {
+            edge |= ResizeEdge.Bottom;
+        }
+
+        return edge;
+    }
+
+    private static Cursor CursorFor(ResizeEdge edge) => edge switch
+    {
+        ResizeEdge.Left or ResizeEdge.Right => Cursors.SizeWE,
+        ResizeEdge.Top or ResizeEdge.Bottom => Cursors.SizeNS,
+        ResizeEdge.Left | ResizeEdge.Top or ResizeEdge.Right | ResizeEdge.Bottom => Cursors.SizeNWSE,
+        ResizeEdge.Right | ResizeEdge.Top or ResizeEdge.Left | ResizeEdge.Bottom => Cursors.SizeNESW,
+        _ => Cursors.Arrow,
+    };
+
+    private Point GetPointerInScreenDips(MouseEventArgs e)
+    {
+        Point devicePoint = PointToScreen(e.GetPosition(this));
+        if (PresentationSource.FromVisual(this)?.CompositionTarget is { } target)
+        {
+            return target.TransformFromDevice.Transform(devicePoint);
+        }
+
+        return devicePoint;
+    }
+
+    private void ResizeFromPointer(Point pointer)
+    {
+        double dx = pointer.X - _resizeStartPointer.X;
+        double dy = pointer.Y - _resizeStartPointer.Y;
+
+        double left = _resizeStartBounds.Left;
+        double top = _resizeStartBounds.Top;
+        double width = _resizeStartBounds.Width;
+        double height = _resizeStartBounds.Height;
+
+        if (_activeResizeEdge.HasFlag(ResizeEdge.Left))
+        {
+            width = Math.Max(MinWidth, _resizeStartBounds.Width - dx);
+            left = _resizeStartBounds.Right - width;
+        }
+        else if (_activeResizeEdge.HasFlag(ResizeEdge.Right))
+        {
+            width = Math.Max(MinWidth, _resizeStartBounds.Width + dx);
+        }
+
+        if (_activeResizeEdge.HasFlag(ResizeEdge.Top))
+        {
+            height = Math.Max(MinHeight, _resizeStartBounds.Height - dy);
+            top = _resizeStartBounds.Bottom - height;
+        }
+        else if (_activeResizeEdge.HasFlag(ResizeEdge.Bottom))
+        {
+            height = Math.Max(MinHeight, _resizeStartBounds.Height + dy);
+        }
+
+        Left = left;
+        Top = top;
+        Width = width;
+        Height = height;
+    }
+
+    private void EndManualResize()
+    {
+        _activeResizeEdge = ResizeEdge.None;
+        if (IsMouseCaptured)
+        {
+            ReleaseMouseCapture();
+        }
+
+        Cursor = Cursors.Arrow;
     }
 
     /// <summary>
@@ -248,26 +428,36 @@ public partial class MainWindow : Window
     private void ApplyAppearance()
     {
         ApplySettings();
+        Opacity = 1.0;
+        Topmost = _settings.AlwaysOnTop;
 
-        // No WindowChrome is present, so nothing supplies resize borders; this
-        // restores them.
-        WindowResizer.Attach(this);
-
-        // WindowChrome would normally have stripped the framish window styles; since
-        // this window does not use it, they are cleared explicitly here. Without this
-        // DWM keeps drawing a system frame around the panel no matter which DWMWA_*
-        // attributes are set.
-        AcrylicBackdrop.RemoveFrameStyles(this);
+        // Accent acrylic works on a popup-style window and does not need the standard
+        // resize frame. Strip it unconditionally on that path: retaining
+        // WS_THICKFRAME / WS_EX_WINDOWEDGE is the visible second rectangle reported by
+        // users. The DWM system-backdrop path may still retain those styles for
+        // diagnostics because some Windows builds refuse to paint the material
+        // without them.
+        if (_settings.BackdropMethod == BackdropMethodKind.Accent
+            || !_settings.KeepFrameStylesForBackdrop)
+        {
+            AcrylicBackdrop.RemoveFrameStyles(this);
+        }
 
         ApplyDropShadow(_settings.ShowDropShadow);
 
-        bool backdrop = AcrylicBackdrop.Apply(this, _settings.UseAcrylicBackdrop, _settings.UseDarkTheme);
-        if (!backdrop && _settings.UseAcrylicBackdrop)
+        // Diagnostic: replace the translucent glass with an opaque fill, so the panel
+        // can be judged with the DWM material taken out of the picture entirely.
+        if (_settings.OpaquePanel)
         {
-            // Expected on Windows 10. The translucent XAML panels provide the
-            // appearance on their own, so this is informational only.
-            DegradedText.Text = "系统不支持亚克力背景，已使用半透明面板";
+            FrameBorder.Background = new SolidColorBrush(
+                _settings.UseDarkTheme
+                    ? System.Windows.Media.Color.FromRgb(0x1A, 0x1B, 0x1F)
+                    : System.Windows.Media.Colors.White);
         }
+
+        // Do not apply a native backdrop to an AllowsTransparency window. It would
+        // supply the opaque backing colour that the user is trying to remove.
+        DegradedText.Text = string.Empty;
     }
 
     /// <summary>
@@ -309,12 +499,6 @@ public partial class MainWindow : Window
         // applied here rather than in the constructor. The window has not been painted
         // yet at this point, so the geometry is applied without a visible jump.
         ApplyAppearance();
-
-        // Reflect the actual registry state rather than assuming a default, and
-        // suppress the change handler while doing so.
-        _initializing = true;
-        AutoStartCheck.IsChecked = AutoStart.IsEnabled();
-        _initializing = false;
 
         // Paint the previous scan immediately, so the panel is not empty for the
         // fraction of a second the first real scan takes. Rows are shown as
@@ -431,7 +615,7 @@ public partial class MainWindow : Window
         // touch a disposed dispatcher.
         _watcher?.Dispose();
         _relativeTimeTimer.Stop();
-        WindowResizer.RemoveHook(this);
+        EndManualResize();
         base.OnClosed(e);
     }
 
@@ -777,28 +961,6 @@ public partial class MainWindow : Window
         {
             StatusText.Text = "清理失败：" + ex.Message;
         }
-    }
-
-    private void OnAutoStartChanged(object sender, RoutedEventArgs e)
-    {
-        if (_initializing)
-        {
-            return;
-        }
-
-        bool wanted = AutoStartCheck.IsChecked == true;
-
-        if (!AutoStart.SetEnabled(wanted))
-        {
-            // Registry refused. Put the checkbox back rather than lying about it.
-            _initializing = true;
-            AutoStartCheck.IsChecked = !wanted;
-            _initializing = false;
-            StatusText.Text = "无法修改开机自启设置（注册表被拒绝访问）";
-            return;
-        }
-
-        StatusText.Text = wanted ? "已设置开机自启" : "已取消开机自启";
     }
 
     private void OnOpenFolderClick(object sender, RoutedEventArgs e)

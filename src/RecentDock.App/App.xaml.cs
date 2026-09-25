@@ -290,6 +290,7 @@ public partial class App : Application
         _settingsWindow.SettingsChanged += (_, updated) =>
         {
             _settings = updated;
+            _window?.ApplyAppearanceSettings(updated);
             ConfigStore.Save(_settings);
         };
 
@@ -360,18 +361,7 @@ public partial class App : Application
             // nothing while the font and icon sliders worked.
             Log($"  brush mutability   : {ThemeManager.DescribeBrushState()}");
 
-            // The decisive check: does the opacity setting actually change the colour
-            // that the window will paint? A frozen brush made this a no-op while
-            // everything still reported success, so the value itself is asserted.
-            Log($"  opacity 0.55 alpha : {ThemeManager.DescribeSurfaceAlphas()}");
-
-            ThemeManager.Apply(settings with { PanelOpacity = 1.0 });
-            Log($"  opacity 1.00 alpha : {ThemeManager.DescribeSurfaceAlphas()}");
-
-            ThemeManager.Apply(settings with { PanelOpacity = 0.3 });
-            Log($"  opacity 0.30 alpha : {ThemeManager.DescribeSurfaceAlphas()}");
-
-            ThemeManager.Apply(settings);
+            Log($"  surface alphas     : {ThemeManager.DescribeSurfaceAlphas()}");
         }
         catch (Exception ex)
         {
@@ -401,19 +391,73 @@ public partial class App : Application
             try
             {
                 panel.WindowStartupLocation = WindowStartupLocation.Manual;
-                panel.Left = -32000;
-                panel.Top = -32000;
+
+                // Show it ON SCREEN, near the top-left.
+                //
+                // An off-screen window (Left = -32000) is not composited, so the DWM
+                // material never contributes to what gets captured. That produced a
+                // completely misleading result: four different material configurations
+                // all sampled as identical pixels, because none of them were actually
+                // being rendered. Sampling only means something while the window is
+                // visible.
+                panel.Left = 40;
+                panel.Top = 40;
                 panel.Show();
+                panel.Activate();
                 panel.UpdateLayout();
+
+                // The window itself must remain opaque so foreground content stays
+                // crisp. Only the XAML surface brushes change alpha.
+                panel.ApplyAppearanceSettings(settings with { PanelOpacity = 0.3 });
+                Log($"  window opacity     : {panel.Opacity:F2}");
+                Log($"  surface at 0.30    : {ThemeManager.DescribeSurfaceAlphas()}");
+                if (Math.Abs(panel.Opacity - 1.0) > 0.001)
+                {
+                    Log("  FAIL foreground would be faded with the window");
+                    exitCode = 1;
+                }
+
+                panel.ApplyAppearanceSettings(settings with { PanelOpacity = 1.0 });
+                Log($"  surface at 1.00    : {ThemeManager.DescribeSurfaceAlphas()}");
+
+                panel.ApplyAppearanceSettings(settings with { AlwaysOnTop = false });
+                Log($"  topmost off        : {panel.Topmost}");
+                if (panel.Topmost)
+                {
+                    Log("  FAIL panel remained topmost after disabling it");
+                    exitCode = 1;
+                }
+
+                panel.ApplyAppearanceSettings(settings with { AlwaysOnTop = true });
+                Log($"  topmost on         : {panel.Topmost}");
+                if (!panel.Topmost)
+                {
+                    Log("  FAIL panel did not become topmost");
+                    exitCode = 1;
+                }
+
+                panel.ApplyAppearanceSettings(settings);
 
                 Log($"  backdrop diagnosis : {AcrylicBackdrop.Diagnose(panel)}");
                 Log($"  window styles      : {AcrylicBackdrop.DescribeWindowStyles(panel)}");
 
-                // Apply the style fix and confirm it took effect, since this is the
-                // step that actually removes the frame.
                 AcrylicBackdrop.RemoveFrameStyles(panel);
                 panel.UpdateLayout();
-                Log($"  styles after fix   : {AcrylicBackdrop.DescribeWindowStyles(panel)}");
+                Log($"  styles cleared     : {AcrylicBackdrop.DescribeWindowStyles(panel)}");
+
+                // Pixel sampling was REMOVED here on purpose.
+                //
+                // Two capture paths were tried - PrintWindow(PW_RENDERFULLCONTENT) and
+                // BitBlt from the screen DC - and study both proved unreliable here:
+                // they reported identical values for eight different material
+                // configurations, and a sanity check that repainted the panel solid blue
+                // and then solid white also reported no change. A probe that cannot see a
+                // deliberate colour change is not evidence of anything, and leaving it in
+                // invites conclusions drawn from noise. It also sent this investigation
+                // down two wrong paths.
+                //
+                // What remains is only what can be trusted: whether each DWM attribute
+                // call succeeded, and the window style bits.
 
                 // Try each material so the right one can be pinned down empirically
                 // rather than guessed at.
@@ -428,23 +472,6 @@ public partial class App : Application
                         type);
                     Log($"  backdrop {name}     : set={ok}");
                 }
-
-                // Settle, then read actual pixels. Everything else in this report is
-                // the app's own opinion; the pixels are the ground truth and are what
-                // distinguishes "the material rendered" from "an opaque layer covers
-                // it".
-                panel.UpdateLayout();
-                panel.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
-                System.Threading.Thread.Sleep(600);
-                panel.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
-
-                Log($"  pixels (mica)      : {SampleWindowPixels(panel)}");
-
-                AcrylicBackdrop.TrySetBackdrop(
-                    new System.Windows.Interop.WindowInteropHelper(panel).Handle,
-                    AcrylicBackdrop.BackdropAcrylic);
-                System.Threading.Thread.Sleep(400);
-                Log($"  pixels (acrylic)   : {SampleWindowPixels(panel)}");
 
                 panel.Hide();
             }
@@ -639,12 +666,16 @@ public partial class App : Application
     /// Capture the window and read a few pixels, to establish what is actually on
     /// screen rather than what the application believes.
     ///
-    /// Every other diagnostic here reports settings - transparent background, material
-    /// applied, composition enabled - and all of them can read as correct while the
-    /// user sees a black rectangle. Sampling the rendered pixels is the only check
-    /// that closes that gap: if the top-left corner and the content area are not the
-    /// same colour, whatever is covering the material is inside the window rather than
-    /// being the window itself.
+    /// Two capture paths, because they answer different questions:
+    ///
+    ///   PrintWindow        captures the application's own drawing. It does NOT include
+    ///                      the DWM material, which the compositor draws - verified by
+    ///                      the fact that four different material configurations all
+    ///                      sampled identically. Useful only for finding opaque layers
+    ///                      laid down by the app itself.
+    ///   screen-to-client   reads straight from the screen DC at the window's client
+    ///                      origin, so it includes the material and whatever is behind
+    ///                      the window. This is the one that can prove the glass works.
     /// </summary>
     private static string SampleWindowPixels(Window window)
     {
@@ -675,34 +706,40 @@ public partial class App : Application
         {
             // PW_RENDERFULLCONTENT (2) is required; without it a composed window
             // captures as blank, which would look like a false failure.
-            if (!PrintWindow(handle, hdcMemory, 2))
+            string ownDrawing;
+            if (PrintWindow(handle, hdcMemory, 2))
             {
-                return "PrintWindow failed";
+                ownDrawing = $"appDraw[corner={ToColor(GetPixel(hdcMemory, 1, 1)):X6}"
+                    + $" content={ToColor(GetPixel(hdcMemory, width / 2, height / 2)):X6}]";
+            }
+            else
+            {
+                ownDrawing = "appDraw[failed]";
             }
 
-            int Corner = ToColor(GetPixel(hdcMemory, 1, 1));
-            int Header = ToColor(GetPixel(hdcMemory, width / 2, 30));
-            int Content = ToColor(GetPixel(hdcMemory, width / 2, height / 2));
-            int Bottom = ToColor(GetPixel(hdcMemory, width / 2, height - 8));
-
-            // Walk inward along the top edge. A system frame shows up as a band of
-            // pixels at the very edge whose colour differs from the panel just inside,
-            // and reporting the run length says how thick it is.
-            var edge = new List<string>(8);
-            int lastPixel = -1;
-            for (int y = 0; y < 10; y++)
+            // Now read the real screen. A point well inside the panel avoids the
+            // border and the rounded corner.
+            var clientOrigin = new POINT { X = 0, Y = 0 };
+            if (!ClientToScreen(handle, ref clientOrigin))
             {
-                int pixel = ToColor(GetPixel(hdcMemory, width / 2, y));
-                if (pixel != lastPixel)
-                {
-                    edge.Add($"y{y}={pixel:X6}");
-                    lastPixel = pixel;
-                }
+                return ownDrawing + " screenPaint[ClientToScreen failed]";
             }
 
-            return $"corner={Corner:X6} header={Header:X6} content={Content:X6} bottom={Bottom:X6}"
-                + $" | corner==content:{Corner == Content}"
-                + $" | topEdge {string.Join(" ", edge)}";
+            int insideX = clientOrigin.X + (width / 2);
+            int insideY = clientOrigin.Y + (height / 2);
+            int outsideX = clientOrigin.X - 12;
+            int outsideY = insideY;
+
+            // BLT from the screen DC into the memory bitmap, then sample.
+            BitBlt(hdcMemory, 0, 0, width, height, hdcScreen, clientOrigin.X, clientOrigin.Y, SRCCOPY);
+            int paintedContent = ToColor(GetPixel(hdcMemory, width / 2, height / 2));
+
+            BitBlt(hdcMemory, 0, 0, width, height, hdcScreen, outsideX, clientOrigin.Y, SRCCOPY);
+            int desktopBeside = ToColor(GetPixel(hdcMemory, 12, height / 2));
+
+            return ownDrawing
+                + $" screen[panel={paintedContent:X6} desktopBeside={desktopBeside:X6}"
+                + $" same={paintedContent == desktopBeside}]";
         }
         finally
         {
@@ -712,6 +749,25 @@ public partial class App : Application
             DeleteDC(hdcScreen);
         }
     }
+
+    private const uint SRCCOPY = 0x00CC0020;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll", SetLastError = false)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+
+    [DllImport("gdi32.dll", SetLastError = false)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool BitBlt(
+        IntPtr hdcDest, int xDest, int yDest, int width, int height,
+        IntPtr hdcSrc, int xSrc, int ySrc, uint rop);
 
     private static int ToColor(uint bgr) => (int)(bgr & 0x00FFFFFF);
 

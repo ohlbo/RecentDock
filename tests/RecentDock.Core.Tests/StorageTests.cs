@@ -46,6 +46,8 @@ public sealed class StorageTests : IDisposable
         Assert.Null(settings.WindowTop);
         Assert.Equal(50, settings.MaxItems);
         Assert.False(settings.ShowMissingTargets);
+        Assert.True(settings.ShowFilePath);
+        Assert.True(settings.AlwaysOnTop);
         Assert.True(settings.UseAcrylicBackdrop);
     }
 
@@ -60,6 +62,8 @@ public sealed class StorageTests : IDisposable
             WindowHeight = 600,
             MaxItems = 25,
             ShowMissingTargets = true,
+            ShowFilePath = false,
+            AlwaysOnTop = false,
             UseAcrylicBackdrop = false,
             StartHidden = true,
         };

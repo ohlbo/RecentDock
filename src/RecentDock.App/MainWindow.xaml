@@ -6,6 +6,7 @@
         MinHeight="240" MinWidth="480"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
+        AllowsTransparency="True"
         Background="Transparent"
         Foreground="{DynamicResource PrimaryTextBrush}"
         FontFamily="Microsoft YaHei UI, Segoe UI"
@@ -44,7 +45,7 @@
   <Border x:Name="FrameBorder"
           BorderBrush="{DynamicResource GlassBorderBrush}"
           BorderThickness="1"
-          CornerRadius="8"
+          CornerRadius="12"
           Background="{DynamicResource GlassTintBrush}">
     <Grid>
       <Grid.RowDefinitions>
@@ -57,9 +58,9 @@
       <!-- ============================ header, doubles as the drag handle -->
       <Border Grid.Row="0"
               Background="{DynamicResource GlassHeaderBrush}"
-              CornerRadius="7,7,0,0"
+              CornerRadius="11,11,0,0"
               MouseLeftButtonDown="OnDragAreaMouseLeftButtonDown">
-        <Grid Margin="12,8,8,8">
+        <Grid Margin="12,6,8,6">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
@@ -67,32 +68,35 @@
             <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
 
-          <StackPanel Grid.Column="0" VerticalAlignment="Center">
-            <TextBlock Text="最近打开" Style="{DynamicResource TitleTextStyle}" />
-            <TextBlock Text="双击打开条目；右键查看更多操作" Style="{DynamicResource CaptionTextStyle}" />
-          </StackPanel>
+          <TextBlock Grid.Column="0"
+                     Text="最近项目"
+                     Style="{DynamicResource TitleTextStyle}"
+                     VerticalAlignment="Center" />
 
           <Button Grid.Column="1"
-                  Content="外观"
+                  Content="⚙"
+                  Style="{DynamicResource HeaderButtonStyle}"
                   Click="OnAppearanceClick"
-                  Padding="12,5"
+                  Padding="8,5"
                   Margin="0,0,6,0"
                   Cursor="Hand"
                   VerticalAlignment="Center"
-                  ToolTip="调整透明度、文字大小、图标大小" />
+                  ToolTip="外观与行为设置" />
 
           <Button Grid.Column="2"
-                  Content="刷新"
+                  Content="↻"
+                  Style="{DynamicResource HeaderButtonStyle}"
                   Click="OnRefreshClick"
-                  Padding="12,5"
+                  Padding="6,3"
                   Margin="0,0,6,0"
                   Cursor="Hand"
                   VerticalAlignment="Center" />
 
           <Button Grid.Column="3"
                   Content="✕"
+                  Style="{DynamicResource HeaderButtonStyle}"
                   Click="OnCloseClick"
-                  Width="30" Height="28"
+                  Width="28" Height="28"
                   Cursor="Hand"
                   VerticalAlignment="Center"
                   ToolTip="关闭（最小化到托盘）" />
@@ -134,12 +138,29 @@
                   ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                   VirtualizingPanel.IsVirtualizing="True"
                   VirtualizingPanel.VirtualizationMode="Recycling"
+                  Padding="6,2"
                   PreviewMouseLeftButtonDown="OnListPreviewMouseDown">
           <ListView.ItemContainerStyle>
             <Style TargetType="ListViewItem">
-              <Setter Property="Padding" Value="6,4" />
+              <Setter Property="Padding" Value="8,5" />
+              <Setter Property="Margin" Value="0" />
               <Setter Property="HorizontalContentAlignment" Value="Stretch" />
               <Setter Property="Focusable" Value="False" />
+              <Setter Property="Background" Value="Transparent" />
+              <Setter Property="BorderThickness" Value="0" />
+              <Setter Property="Template">
+                <Setter.Value>
+                  <ControlTemplate TargetType="ListViewItem">
+                    <Border x:Name="RowSurface"
+                            Background="{TemplateBinding Background}"
+                            CornerRadius="7"
+                            Padding="{TemplateBinding Padding}">
+                      <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                        VerticalAlignment="Center" />
+                    </Border>
+                  </ControlTemplate>
+                </Setter.Value>
+              </Setter>
               <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
                   <Setter Property="Background" Value="{DynamicResource HoverBrush}" />
@@ -175,7 +196,7 @@
                        Source="{Binding Icon}"
                        Width="{DynamicResource RowIconSize}"
                        Height="{DynamicResource RowIconSize}"
-                       Margin="0,0,8,0"
+                       Margin="0,0,11,0"
                        VerticalAlignment="Center" />
 
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
@@ -208,7 +229,8 @@
                     </TextBlock.Style>
                   </TextBlock>
                   <TextBlock Text="{Binding FolderPath}"
-                             Style="{DynamicResource CaptionTextStyle}" />
+                             Style="{DynamicResource CaptionTextStyle}"
+                             Visibility="{DynamicResource FilePathVisibility}" />
                 </StackPanel>
 
                 <TextBlock Grid.Column="2"
@@ -260,13 +282,12 @@
       <!-- ============================ status bar -->
       <Border Grid.Row="3"
               Background="{DynamicResource GlassHeaderBrush}"
-              CornerRadius="0,0,7,7"
-              Padding="12,6">
+              CornerRadius="0,0,11,11"
+              Padding="12,4">
         <Grid>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
 
@@ -297,15 +318,6 @@
                   Cursor="Hand"
                   Visibility="Collapsed"
                   ToolTip="删除 Recent 目录中目标已不存在的记录" />
-
-          <CheckBox x:Name="AutoStartCheck"
-                    Grid.Column="3"
-                    Content="开机自启"
-                    FontSize="{DynamicResource CaptionFontSize}"
-                    VerticalAlignment="Center"
-                    Cursor="Hand"
-                    Checked="OnAutoStartChanged"
-                    Unchecked="OnAutoStartChanged" />
         </Grid>
       </Border>
     </Grid>

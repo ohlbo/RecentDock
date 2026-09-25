@@ -40,17 +40,19 @@ public static class ThemeManager
     {
         ArgumentNullException.ThrowIfNull(settings);
 
+        // Only the panel surfaces become transparent. Text and icons stay fully
+        // opaque, which is the behaviour users expect from a glass panel.
         ApplyPalette(settings.PanelOpacity, settings.UseDarkTheme);
         SetIconSize(settings.IconSize);
         ApplyTextStyles(settings.FontSize);
+        ReplaceResource(
+            "FilePathVisibility",
+            settings.ShowFilePath ? Visibility.Visible : Visibility.Collapsed);
     }
 
     /// <summary>
-    /// Repaint the palette in place.
-    ///
-    /// Opacity multiplies the baseline alpha, so 1.0 reproduces the designed look and
-    /// lower values thin all three surfaces by the same factor. Scaling rather than
-    /// setting each independently preserves the designed relationship between them.
+    /// Repaint the palette in place. Opacity scales only the translucent background
+    /// surfaces; foreground brushes remain fully opaque.
     /// </summary>
     private static void ApplyPalette(double opacity, bool darkTheme)
     {
@@ -60,6 +62,10 @@ public static class ThemeManager
         MutateBrush("GlassTintBrush", tint, Scale(TintBaseAlpha, factor));
         MutateBrush("GlassHeaderBrush", tint, Scale(HeaderBaseAlpha, factor));
         MutateBrush("GlassSurfaceBrush", tint, Scale(SurfaceBaseAlpha, factor));
+        MutateBrush(
+            "DialogSurfaceBrush",
+            darkTheme ? Color.FromRgb(0x25, 0x26, 0x2A) : Color.FromRgb(0xF7, 0xF7, 0xF9),
+            0xFF);
 
         // The hairline is not scaled with the surfaces: it is a separator, and
         // thinning it just makes it disappear.

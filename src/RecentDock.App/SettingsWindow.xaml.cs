@@ -39,6 +39,9 @@ public partial class SettingsWindow : Window
         OpacitySlider.Value = current.PanelOpacity;
         FontSlider.Value = current.FontSize;
         IconSlider.Value = current.IconSize;
+        ShowPathCheckBox.IsChecked = current.ShowFilePath;
+        AlwaysOnTopCheckBox.IsChecked = current.AlwaysOnTop;
+        AutoStartCheckBox.IsChecked = AutoStart.IsEnabled();
 
         UpdateValueLabels();
 
@@ -88,6 +91,51 @@ public partial class SettingsWindow : Window
         Publish();
     }
 
+    private void OnShowPathChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        Publish();
+    }
+
+    private void OnAlwaysOnTopChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        Publish();
+    }
+
+    private void OnAutoStartChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        bool wanted = AutoStartCheckBox.IsChecked == true;
+        if (AutoStart.SetEnabled(wanted))
+        {
+            return;
+        }
+
+        _loading = true;
+        AutoStartCheckBox.IsChecked = !wanted;
+        _loading = false;
+
+        MessageBox.Show(
+            this,
+            "无法修改开机自启动设置，注册表访问被拒绝。",
+            "RecentDock",
+            MessageBoxButton.OK,
+            MessageBoxImage.Warning);
+    }
+
     /// <summary>
     /// Build the new settings object, apply it live, then tell the host.
     ///
@@ -101,6 +149,8 @@ public partial class SettingsWindow : Window
             PanelOpacity = Math.Round(OpacitySlider.Value, 2),
             FontSize = Math.Round(FontSlider.Value),
             IconSize = Math.Round(IconSlider.Value),
+            ShowFilePath = ShowPathCheckBox.IsChecked == true,
+            AlwaysOnTop = AlwaysOnTopCheckBox.IsChecked == true,
         };
 
         ThemeManager.Apply(Result);
@@ -125,6 +175,8 @@ public partial class SettingsWindow : Window
         OpacitySlider.Value = defaults.PanelOpacity;
         FontSlider.Value = defaults.FontSize;
         IconSlider.Value = defaults.IconSize;
+        ShowPathCheckBox.IsChecked = defaults.ShowFilePath;
+        AlwaysOnTopCheckBox.IsChecked = defaults.AlwaysOnTop;
         _loading = false;
 
         UpdateValueLabels();
