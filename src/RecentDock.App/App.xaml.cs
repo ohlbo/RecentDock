@@ -441,6 +441,13 @@ public partial class App : Application
                 Log($"  backdrop diagnosis : {AcrylicBackdrop.Diagnose(panel)}");
                 Log($"  window styles      : {AcrylicBackdrop.DescribeWindowStyles(panel)}");
 
+                Log($"  tray-only window   : {AcrylicBackdrop.IsTrayUtilityWindow(panel)}");
+                if (panel.ShowInTaskbar || !AcrylicBackdrop.IsTrayUtilityWindow(panel))
+                {
+                    Log("  FAIL panel would appear in the taskbar or Alt+Tab");
+                    exitCode = 1;
+                }
+
                 AcrylicBackdrop.RemoveFrameStyles(panel);
                 panel.UpdateLayout();
                 Log($"  styles cleared     : {AcrylicBackdrop.DescribeWindowStyles(panel)}");

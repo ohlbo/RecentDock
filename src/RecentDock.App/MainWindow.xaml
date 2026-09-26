@@ -6,6 +6,7 @@
         MinHeight="240" MinWidth="480"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
+        ShowInTaskbar="False"
         AllowsTransparency="True"
         Background="Transparent"
         Foreground="{DynamicResource PrimaryTextBrush}"

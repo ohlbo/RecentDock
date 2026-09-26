@@ -4,6 +4,7 @@ obj/
 
 # Publish output
 dist/
+release/
 
 # Sandbox / local tooling state.
 # These exist because builds on this machine must redirect the .NET CLI home,

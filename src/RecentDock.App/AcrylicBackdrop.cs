@@ -306,12 +306,70 @@ public static class AcrylicBackdrop
         const long WS_BORDER = 0x00800000;
         const long WS_EX_CLIENTEDGE = 0x00000200;
         const long WS_EX_WINDOWEDGE = 0x00000100;
+        const long WS_EX_TOOLWINDOW = 0x00000080;
+        const long WS_EX_APPWINDOW = 0x00040000;
 
         return $"CAPTION={(style & WS_CAPTION) != 0}"
             + $" THICKFRAME={(style & WS_THICKFRAME) != 0}"
             + $" BORDER={(style & WS_BORDER) != 0}"
             + $" EX_CLIENTEDGE={(exStyle & WS_EX_CLIENTEDGE) != 0}"
-            + $" EX_WINDOWEDGE={(exStyle & WS_EX_WINDOWEDGE) != 0}";
+            + $" EX_WINDOWEDGE={(exStyle & WS_EX_WINDOWEDGE) != 0}"
+            + $" EX_TOOLWINDOW={(exStyle & WS_EX_TOOLWINDOW) != 0}"
+            + $" EX_APPWINDOW={(exStyle & WS_EX_APPWINDOW) != 0}";
+    }
+
+    /// <summary>
+    /// Keep the panel out of both the taskbar and the Alt+Tab application switcher.
+    ///
+    /// ShowInTaskbar=false normally applies WS_EX_TOOLWINDOW by itself, but the
+    /// panel also rewrites native frame styles for its transparent borderless
+    /// appearance. Reasserting the two relevant bits after those changes makes the
+    /// tray-only behaviour explicit and prevents a later style rewrite from adding
+    /// WS_EX_APPWINDOW back.
+    /// </summary>
+    public static void EnsureTrayUtilityStyles(Window window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+
+        IntPtr handle = new WindowInteropHelper(window).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        const long WS_EX_TOOLWINDOW = 0x00000080;
+        const long WS_EX_APPWINDOW = 0x00040000;
+
+        long exStyle = GetWindowLongPtr(handle, GWL_EXSTYLE).ToInt64();
+        long newExStyle = (exStyle | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW;
+        if (newExStyle == exStyle)
+        {
+            return;
+        }
+
+        SetWindowLongPtr(handle, GWL_EXSTYLE, new IntPtr(newExStyle));
+        SetWindowPos(
+            handle,
+            IntPtr.Zero,
+            0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
+
+    /// <summary>Whether the native styles exclude this window from Alt+Tab.</summary>
+    public static bool IsTrayUtilityWindow(Window window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+
+        IntPtr handle = new WindowInteropHelper(window).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        const long WS_EX_TOOLWINDOW = 0x00000080;
+        const long WS_EX_APPWINDOW = 0x00040000;
+        long exStyle = GetWindowLongPtr(handle, GWL_EXSTYLE).ToInt64();
+        return (exStyle & WS_EX_TOOLWINDOW) != 0 && (exStyle & WS_EX_APPWINDOW) == 0;
     }
 
     /// <summary>

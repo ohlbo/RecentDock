@@ -504,6 +504,10 @@ public partial class MainWindow : Window
             AcrylicBackdrop.RemoveFrameStyles(this);
         }
 
+        // This is a tray utility, not a normal document window. Keep it out of the
+        // taskbar and Alt+Tab even after the native frame-style adjustments above.
+        AcrylicBackdrop.EnsureTrayUtilityStyles(this);
+
         ApplyDropShadow(_settings.ShowDropShadow);
 
         // Diagnostic: replace the translucent glass with an opaque fill, so the panel
