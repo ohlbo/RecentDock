@@ -1029,6 +1029,24 @@ $env:TMP = "$root\.tmp"; $env:TEMP = "$root\.tmp"
 
 - 本机 schannel 在**沙箱外**同样不可用（`SEC_E_NO_CREDENTIALS`），HTTPS 下载需走
   `tools/parallel-download.js`（Node/OpenSSL）。该脚本与项目无关，验证完可删。
+- **`git push` 必须改用原生 OpenSSH**。沙箱内 Git for Windows 自带的 msys `ssh.exe` 起不来：
+
+  ```
+  ssh.exe: *** fatal error - couldn't create signal pipe, Win32 error 5
+  fatal: Could not read from remote repository.
+  ```
+
+  换成系统自带的那份即可（同样的密钥、同样的远端，无需改配置）：
+
+  ```powershell
+  git -c core.sshCommand="C:/Windows/System32/OpenSSH/ssh.exe" push origin main
+  ```
+
+  注意：HTTPS 到 github.com 在本机整体不可用（见上一条），所以**GitHub Release 只能走网页**，
+  `gh release create` / REST API 在这里都连不上。
+- **`dotnet test`（VSTest）无法启动**：testhost 要打开父进程句柄，受限令牌被拒
+  （`Win32Exception (5)`），连 `dotnet --info` 都会因此崩溃。跑单测要么放宽权限，
+  要么用最小反射 runner 直接执行同一批 `[Fact]`/`[Theory]`。
 
 ### 构建与测试
 
