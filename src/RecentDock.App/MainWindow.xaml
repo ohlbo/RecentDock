@@ -311,6 +311,7 @@
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
 
           <TextBlock x:Name="StatusText"
@@ -330,8 +331,22 @@
                      VerticalAlignment="Center"
                      TextAlignment="Right" />
 
-          <Button x:Name="CleanupButton"
+          <!-- Shown only when the process is restricted (low integrity), where the
+               shell refuses the tray icon and shell activation. Elevating is the only
+               way out of that state, and it needs the user's consent. -->
+          <Button x:Name="ElevateButton"
                   Grid.Column="2"
+                  Content="以正常权限重启"
+                  Click="OnElevateClick"
+                  FontSize="{DynamicResource CaptionFontSize}"
+                  Padding="8,2"
+                  Margin="0,0,10,0"
+                  Cursor="Hand"
+                  Visibility="Collapsed"
+                  ToolTip="当前以受限权限运行，托盘图标和打开文件会被系统拒绝。点击后由系统请求提权并重启。" />
+
+          <Button x:Name="CleanupButton"
+                  Grid.Column="3"
                   Content="清理失效"
                   Click="OnCleanupClick"
                   FontSize="{DynamicResource CaptionFontSize}"

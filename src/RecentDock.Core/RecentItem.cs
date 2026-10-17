@@ -56,8 +56,13 @@ public sealed record RecentItem
     public bool IsDirectory { get; init; }
 
     /// <summary>
-    /// Approximate access time, taken from the .lnk file's LastWriteTime.
-    /// Used only when no registry rank is available.
+    /// Best known last-open time.
+    ///
+    /// Starts as the .lnk file's LastWriteTime, which is when Windows first created
+    /// the record - the file is never rewritten, so on its own this is "first opened",
+    /// not "last opened". <see cref="Storage.OpenTimeTracker"/> replaces it with a time
+    /// derived from MRU movement whenever a reopen is observable, so by the time a
+    /// scan result reaches the UI this holds the newest evidence available.
     /// </summary>
     public DateTimeOffset LastAccessTime { get; init; }
 

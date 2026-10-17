@@ -7,15 +7,18 @@ namespace RecentDock.App;
 /// <summary>
 /// Watches for changes that should trigger a panel refresh.
 ///
-/// Three separate triggers, because no single one covers the ground:
+/// Four separate triggers, because no single one covers the ground:
 ///
 ///   1. FileSystemWatcher on the Recent folder, for new/updated/deleted .lnk files.
 ///   2. A buffer-overflow fallback: FileSystemWatcher silently stops delivering
 ///      events after its buffer overflows, so the Error event must be handled or
 ///      the panel freezes on stale data forever with no visible symptom.
-///   3. A slow poll, because the RecentDocs registry key cannot be watched at all.
-///      This is also what keeps tracking-state changes (the user flipping the
-///      Windows setting) reflected without a restart.
+///   3. RegNotifyChangeKeyValue on the RecentDocs key, for an open that updates the
+///      record but not a .lnk in the Recent folder. This is what makes reopening a
+///      file in Explorer refresh its open time within the debounce rather than at the
+///      next poll.
+///   4. A slow poll, as the safety net: it covers tracking-state changes and any
+///      trigger above that failed to start.
 ///
 /// All events are collapsed through one debounce timer: a batch operation such as
 /// unzipping or a multi-file save produces dozens of raw events, and each one would
@@ -30,9 +33,10 @@ public sealed class RecentWatcher : IDisposable
     private static readonly TimeSpan DebounceInterval = TimeSpan.FromMilliseconds(500);
 
     /// <summary>
-    /// Poll period. The registry cannot be watched, so this is the only way to
-    /// notice RecentDocs changes and tracking-state flips. Kept slow because each
-    /// tick costs a full scan.
+    /// Poll period. The last-resort trigger: the registry watcher covers RecentDocs
+    /// promptly, so this exists only for the case where a notification could not be
+    /// armed, and for tracking-state flips. Kept slow because each tick costs a full
+    /// scan.
     /// </summary>
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(30);
 
@@ -45,6 +49,7 @@ public sealed class RecentWatcher : IDisposable
     private readonly DispatcherTimer _debounceTimer;
     private readonly DispatcherTimer _pollTimer;
     private FileSystemWatcher? _watcher;
+    private RecentDocsWatcher? _registryWatcher;
     private bool _disposed;
 
     /// <summary>Raised on the UI thread when the panel should rescan.</summary>
@@ -85,7 +90,34 @@ public sealed class RecentWatcher : IDisposable
     public void Start()
     {
         StartWatcher();
+        StartRegistryWatcher();
         _pollTimer.Start();
+    }
+
+    /// <summary>
+    /// Add the RecentDocs notification. Failure is reported as a degradation but is
+    /// not fatal: polling still covers the key, just with a delay.
+    /// </summary>
+    private void StartRegistryWatcher()
+    {
+        try
+        {
+            var watcher = new RecentDocsWatcher();
+            watcher.Changed += (_, _) => ScheduleRefresh();
+
+            if (!watcher.Start())
+            {
+                watcher.Dispose();
+                Degraded?.Invoke(this, "注册表监视不可用，最近记录将定时刷新");
+                return;
+            }
+
+            _registryWatcher = watcher;
+        }
+        catch (Exception ex)
+        {
+            Degraded?.Invoke(this, $"注册表监视不可用（{ex.GetType().Name}），最近记录将定时刷新");
+        }
     }
 
     private void StartWatcher()
@@ -220,6 +252,9 @@ public sealed class RecentWatcher : IDisposable
         _disposed = true;
         _debounceTimer.Stop();
         _pollTimer.Stop();
+
+        _registryWatcher?.Dispose();
+        _registryWatcher = null;
 
         try
         {

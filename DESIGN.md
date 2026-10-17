@@ -374,8 +374,12 @@ var sb = new StringBuilder(260, 260);
 - `Filter = "*.lnk"`，`NotifyFilter = FileName | LastWrite | CreationTime`，
   `IncludeSubdirectories = false`（否则子目录跳转列表会引发无意义刷新）。
 - 事件响应加 **500ms 防抖**（事件合并），回调在**线程池线程**，必须封送回 Dispatcher。
-- **注册表变化无法被 Watcher 感知** → 30 秒定时轮询兜底，同时负责跟踪状态翻转与
-  相对时间文案刷新。
+- **RecentDocs 注册表键用 `RegNotifyChangeKeyValue` 监视**（`RecentDocsWatcher.cs`）：
+  早期版本断言"注册表变化无法被 Watcher 感知"，这个断言是错的，代价是重开文件的记录变更
+  要等 30 秒轮询才反映出来。异步模式下通知直接投递到事件对象，无需专用线程，每次触发后
+  必须**重新武装**（它不是订阅）。
+- 30 秒定时轮询仍保留，作为兜底：注册表通知武装失败时的唯一覆盖，同时也负责跟踪状态翻转
+  与相对时间文案刷新。
 
 #### 实测验证结果（`RecentDock.exe --watchtest`）
 
@@ -428,10 +432,13 @@ OK: burst coalesced into a single refresh.   ← 18 个原始事件被合并成 
 
 - 刷新时**不要整体替换 `ItemsSource`**（会重置滚动位置）。用 `ObservableCollection`
   按 `TargetPath` 做 key 的差量更新。
-- 图标：`SHGetFileInfo(SHGFI_ICON | SHGFI_SMALLICON)` 取 HICON，
-  用 `Imaging.CreateBitmapSourceFromHIcon` 转换，**按扩展名缓存**，
+- 图标：`SHGetFileInfo(SHGFI_ICON | SHGFI_LARGEICON)` 取 HICON，
+  用 `Imaging.CreateBitmapSourceFromHIcon` 转换，**按扩展名缓存**（键必须等于被缓存的
+  那个扩展名，不能有共享键 —— 见 v0.5.2 缺陷 4），
   并对每个 HICON 调用 `DestroyIcon`。不缓存会导致滚动时疯狂分配 GDI 对象。
   避免 `System.Drawing`（.NET 8 已限制且与 WPF 互操作麻烦）。
+- 复用行对象时**任何随时间/状态变化的字段都要显式刷新**：图标走缓存所以不用重建，
+  但打开时间、有效性、收藏状态都在变，漏一个就会出现"顺序对了但文案还是旧的"。
 - 相对时间需定时器（60 秒）刷新文案。
 
 **交互语义澄清（必须写入 README）**：
@@ -724,6 +731,185 @@ if (!StaComScope.EnsureInitialized())
 记录**（测试实测：探针 + 原记录 = 删 2 条），而确认框原文写的是"移除这条记录"。
 措辞已改为"会删除该文件在最近列表中的记录（若存在多条则一并删除）"。
 
+#### v0.5.2：按用户反馈修复的三处缺陷 + 图标重制
+
+用户反馈原文（`改进建议.txt`）：
+
+```
+1.从软件中或者资源管理器再次打开某个文件的时候更新右侧的打开时间
+2.设计一个好看的图标
+3.最近项目记录的保存时间
+4.图标出现错误(png,mp4,.md,.xopp)。
+```
+
+**缺陷 1 与 3 是同一个问题，而且有两层根因。**
+
+第一层（数据源）：**Windows 的最近记录里根本没有"最后打开时间"这个字段。**
+逐字节验证过两处：
+
+- `RecentDocs` 单条记录 = 文件名 + 元数据（总长 / 常量字段）+ 文件名 + PIDL，
+  **扫描整段缓冲区，不存在任何能解成 2023–2028 的 FILETIME**；
+- Recent 目录里的 `.lnk` **只写一次**：实测 79 个文档快捷方式中，
+  `LastWriteTime > CreationTime` 的有 **0 个**。
+
+所以旧代码里的"打开时间"（`.lnk` 的 LastWriteTime）实际含义是**第一次打开时间**，
+重新打开它不会变 —— 这正是"再次打开后时间不更新"的直接原因。
+
+第二层（UI）：即便数据源更新了，也已经显示在屏上的行**不会换时间**。
+`ApplyItems` 故意复用行对象（保住图标缓存与绑定，避免闪烁），但合并时只调用了
+`UpdateValidity` / `UpdatePinned`，而 `_lastAccess` 是构造时写入的 `readonly` 字段、
+`RelativeTime` 由它派生。从首屏快照恢复的行更是把快照里的旧时间永久钉住。
+
+修复分三处：
+
+1. `OpenTimeTracker`（`Core/Storage/OpenTimeStore.cs`）：既然没有时间戳，就用 Windows
+   **确实保证**的东西推断 —— 打开文件会把它的记录移到 `MRUListEx` 最前。因此
+   **名次比上次扫描更靠前 ⇒ 上次扫描之后被打开过 ⇒ 打开时间取当前时刻**。
+   推断结果按路径持久化到 `open-times.json`，重启后仍有效。
+   三条防误报规则，都有单测（`OpenTimeTrackerTests`，9 个用例）：
+   - **记录数变少时不推断**：删除一条记录会让它下面所有条目名次提升，否则一次清理会把半屏
+     条目误标成"刚刚打开"；
+   - **距上次扫描超过 10 分钟时，时间取上次扫描时刻而不是"现在"**：程序没运行时发生的打开
+     无法知道具体时间，宁可保守（显示"昨天"）也不能编一个"刚刚"；
+   - 名次不变则保持原值，且 `.lnk` 时间戳更新时以更新者为准。
+2. 行对象改为可变时间：`UpdateLastAccess`（**只向前**，避免快照与重扫竞态时时钟倒退）并
+   重新发出 `RelativeTime` 通知，`ApplyItems` 在复用分支里调用。
+3. 面板内打开走 `MarkOpened()`：点击是**确定的**信号，直接置为"刚刚"，2 秒后再扫一次校准。
+   这个乐观值**单独存一个字段、不写进快照** —— 早期版本把它并进 `LastAccessTime`，
+   "只向前"规则随即把猜测钉成了事实：某文件记录时间是昨天，面板却一直显示"3 分钟前"，
+   重扫也纠正不了（本轮验证脚手架发现了这个问题）。
+
+**已知局限（诚实标注）**：重新打开"本来就是同类型第一名"的文件时名次不变，
+从系统记录无法判断，此时显示上一次推断出的时间。面板内点击不受影响。
+
+**缺陷 4：图标缓存键与缓存内容不一致（本轮最有价值的发现）。**
+
+`ShellIconProvider` 按扩展名缓存 HICON，但旧代码在"目标不存在/不可达"时把缓存键写成
+**共享的 `<file>`**，同时又**仍然按该行自己的扩展名去取图标**：
+
+```csharp
+key = "<file>";                       // 所有未知/失效行共用一格
+BitmapSource? bitmap = Load(extension, attributes);   // 但用的是本行扩展名
+Cache[key] = bitmap;                  // 第一个行把它的图标写进了共享格子
+```
+
+于是**第一个**创建的行把它的图标塞进共享格子，**之后每一个不同类型的行都拿到第一个行的
+图标**。首屏快照恢复的行全部以 `Validity.Unreachable` 创建，正好全部命中这条路径 ——
+这就是"重启后 png / mp4 / md / xopp 显示成彼此图标"的原因。
+
+修复：缓存键一律取扩展名（`isDirectory` 用 `<dir>`，无扩展名才用 `<file>`），让缓存条目
+描述它真正缓存的东西；`targetExists` 参数随之删除（它其实从未改变取图标的结果，
+只污染了缓存键）。顺带把请求从 `SHGFI_SMALLICON`（16 px）改为 `SHGFI_LARGEICON`（32 px），
+因为行图标大小可调到 48 px，从 32 起缩放比从 16 放大的块状锯齿好得多。
+
+**响应及时性：新增 `RecentDocsWatcher`（`RegNotifyChangeKeyValue`）。**
+
+DESIGN 早先断言"注册表变化无法被 Watcher 感知"，这个断言是错的：Win32 有
+`RegNotifyChangeKeyValue`，异步模式下直接把变更信号投到事件对象上，不需要专用线程。
+新增第 4 个触发器后，**从资源管理器重开文件 → 记录变更 → 500 ms 防抖后刷新**成为常态，
+而不是等 30 秒轮询。它只是增强：`Start()` 失败或重新武装失败时安静退回轮询。
+
+诚实标注：本机沙箱**禁止写注册表**（连 `reg add` 都是 Access denied），所以只验证到
+"打开键 + 武装通知成功"（`RegOpenKeyEx` / `RegNotifyChangeKeyValue` 均返回 0），
+**变更投递这一段没有端到端跑过**。真机首次运行时若状态栏出现"注册表监视不可用"，
+说明该环境确实不支持，轮询仍是兜底。
+
+**图标重制（缺陷 2）。**
+
+原 `app.ico` 只有一个 16×16 条目，托盘和资源管理器的所有尺寸都是它放大出来的。
+改为程序化生成（`tools/make-icon.py`，Pillow）：靛蓝圆角底 + 叠放的两张白色卡片 + 琥珀色
+时钟徽章，导出 16/20/24/32/40/48/64/128/256 共 9 个尺寸，每个尺寸**按自身分辨率 8× 超采样
+渲染后缩小**（而不是从 256 缩）—— 16 px 上的 1 px 间隙因此真的分得开。
+时间指针只在 ≥32 px 绘制，否则在 16 px 上只会糊成一团。
+
+验证方式：
+
+- 入库单测 `OpenTimeTrackerTests`（9 个用例）覆盖推断规则与持久化；
+- 临时脚手架 `paneltest`（未入库，位于 `.tmp/`）构造真实的 `RecentItemViewModel`，
+  断言 6 种扩展名的图标哈希互不相同、`UpdateLastAccess` 只前进不后退、`MarkOpened`
+  不污染 `LastAccessTime`，并把真实面板渲染成 PNG 肉眼比对。
+
+环境约束记录：本机 VSTest 无法启动（testhost 要打开父进程句柄，受限令牌被拒，
+Win32 错误 5），因此单测通过一个最小反射 runner 执行（`paneltest runtests <dll>`），
+结果是 53 passed / 0 failed。
+
+#### 用户实测反馈（二）：托盘消失、部分文件打不开、explorer.exe 0xc0000142
+
+三个现象是**同一个原因**：程序运行在**低完整性（low integrity）**令牌下。下面每一条都是
+实测结果，不是推测：
+
+| 探针 | 结果 |
+|---|---|
+| `whoami /groups` | `Mandatory Label\Low Mandatory Level` |
+| `Shell_NotifyIcon(NIM_ADD)`（自己 P/Invoke，绕开 WinForms 的静默失败） | **返回 False** —— 托盘图标根本没被 shell 接受 |
+| `ShellExecute` 打开**文件夹** | `Access is denied`（打开普通文件则正常） |
+| `ShellExecute` 打开 **.png**（Photos/AppX 处理） | `Access is denied`（.md / .mp4 / .xlsx 都正常） |
+| 由本进程拉起 `explorer.exe` | 进程退出 `0xc0000142` = `STATUS_DLL_INIT_FAILED` |
+| `schtasks /create`、`schtasks /query` | 均失败（任务计划服务不可达） |
+
+即：**低完整性进程无法让 shell 替它做事** —— 目录和由打包应用处理的文件必须由 shell 激活，
+托盘图标同样被拒绝；再拉起第二个 explorer 只会得到那个吓人的 0xc0000142 对话框。
+这些没有一件能靠改面板代码解决，因为**进程无法提升自己的完整性级别**。
+
+因此本轮做的是"承认 + 给出出路"，而不是继续换 API 重试：
+
+| 改动 | 原因 |
+|---|---|
+| `RunContext`：读 `TokenIntegrityLevel` 的 SID RID | 直接判定受限环境，不再靠猜 |
+| **首次启动即自动提权**（`App.TryElevateOnStartup`，窗口创建前） | 用户问的正是"为什么不能第一次就正常权限"：因为**进程无法提升自己的完整性级别**，令牌在创建时由父进程给定，唯一途径是让 Windows 以用户身份**新建**一个进程，而这必须经过 UAC 同意。所以能做的只是"检测到就立刻发起提权"，不能静默完成 |
+| 提权结果被记住（`AutoElevateDeclined`） | 取消一次后不再每次启动都弹；状态栏按钮仍可随时重试，不需要改配置文件 |
+| 状态栏常驻提示 + **"以正常权限重启"按钮** | 自动提权被取消/不可用时的手动出路 |
+| 重启时传 `--elevated-restart`，`SingleInstance.TryAcquire(8s)` 等锁 | 新实例由旧实例拉起，两者必然短暂并存；不等锁就会自杀，用户手上一个实例都不剩；该参数同时保证**不会形成启动循环** |
+| `--selftest` 增加 `run context` 行 | 一份日志即可区分"程序坏了"和"启动环境不对" |
+| 打开文件时 `WorkingDirectory` 设为目标所在目录 | 否则子进程继承我们的 `dist` 目录（正是用户截图错误信息里那串路径） |
+| "打开所在位置"改用 `SHOpenFolderAndSelectItems`，**并删掉 explorer.exe 兜底** | 兜底在受限环境下只会再弹一次 0xc0000142；清晰的错误信息比第二次失败有用 |
+| `Access is denied` 的文案按上下文补一句判定 | 原文会让读者去怀疑文件权限，方向完全错了 |
+
+另外说明"安全警告（无法验证发布者）"：那是未签名 exe 的常规提示，与程序行为无关。
+`Get-Item -Stream *` 确认当前 `dist\RecentDock.exe` **不带** `Zone.Identifier`；
+再出现可在文件属性里勾"解除锁定"，或执行 `Unblock-File`。
+
+**给正常用户的话**：这一节描述的是"把程序塞进沙箱或受限启动器"才会遇到的场景。
+普通双击启动不会出现该提示，也不需要提权。
+
+#### 用户实测反馈（三）：SmartScreen 拦截新构建（"Windows 已保护你的电脑"）
+
+现象：换了新构建后，双击 exe 弹出全屏蓝色"Microsoft Defender SmartScreen 阻止了无法识别的
+应用启动，发布者未知"。旧版本反而能直接启动。
+
+实测状态（都是查出来的，不是猜的）：
+
+| 检查 | 结果 |
+|---|---|
+| `Get-AuthenticodeSignature dist\RecentDock.exe` | `NotSigned` |
+| `Zone.Identifier`（Mark of the Web） | **不存在** |
+| Smart App Control（`VerifiedAndReputablePolicyState`） | `0`（关闭） |
+| `WinDefend` 服务 | Stopped |
+| `smartscreen.exe` | 存在 |
+
+根因：**每个重新构建的二进制都是全新的、未签名的哈希，SmartScreen 对它没有信誉记录**，
+于是按"无法识别的应用"拦截。旧版本之所以能跑，是因为那个哈希已经被放行过；我这几轮每改一处
+就重新发布一次，等于每次都换成一个"陌生人"。
+
+处理：**本机自签名**。新增 `tools\sign.ps1`，首次运行创建 `CN=RecentDock Local Build` 证书，
+用 `X509Store` 装进当前用户的"受信任的根"和"受信任的发布者"，然后
+`Set-AuthenticodeSignature`（带 DigiCert 时间戳，证书过期后签名仍有效）。
+`tools\publish.ps1` 把发布和签名合成一步——否则"忘记签名"必然导致下一次启动又被拦。
+
+两个实现坑（都是实测撞出来的）：
+
+1. **`New-SelfSignedCertificate` 在这里报 `NTE_PERM (0x80090010)`**：创建证书要写密钥容器和
+   注册表，受沙箱限制时必须放宽权限才能完成。
+2. **`Import-Certificate` 写 `Cert:\CurrentUser\Root` 报 "UI is not allowed in this operation"**：
+   向根存储导入是需要用户确认的操作，cmdlet 没有交互界面就拒绝。改用
+   `System.Security.Cryptography.X509Certificates.X509Store` 直接 `Add`，
+   证书由脚本自建、只装进当前用户存储，不需要弹窗。
+
+验证：签名后 `status = Valid`、`timestamped = True`，`--selftest` 仍正常。
+
+**注意边界**：自签名的信任是本机的，发给别人仍显示"未知发布者"；正式分发要用 CA 证书，
+或去做 SmartScreen 信誉积累。
+
 ---
 
 ## 三、修订后的仓库结构
@@ -766,6 +952,10 @@ if (!StaComScope.EnsureInitialized())
 ```
 
 （从 33 增至 36，新增的三条覆盖设置页面 URI 的修正与诊断方法。）
+
+> v0.5.2 起为 **53 个**：新增 `OpenTimeTrackerTests` 9 个（MRU 名次推断规则 + 持久化），
+> 其余仍是既有的 44 个。本机 `dotnet test` 无法启动（testhost 需打开父进程句柄，
+> 受限令牌被拒），改用最小反射 runner 执行同一批 `[Fact]`/`[Theory]`，结果 53/53。
 
 #### 端到端验证：真实数据 + 真实文件事件
 

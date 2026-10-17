@@ -25,7 +25,8 @@ namespace RecentDock.App;
 /// </summary>
 public sealed class RecentItemViewModel : INotifyPropertyChanged
 {
-    private readonly DateTimeOffset _lastAccess;
+    private DateTimeOffset _lastAccess;
+    private DateTimeOffset? _openedAt;
     private bool _isPinned;
 
     public RecentItemViewModel(RecentItem item, bool isPinned = false)
@@ -62,7 +63,7 @@ public sealed class RecentItemViewModel : INotifyPropertyChanged
             }
         }
 
-        Icon = ShellIconProvider.GetIcon(extension, item.IsDirectory, item.Validity == ItemValidity.Valid);
+        Icon = ShellIconProvider.GetIcon(extension, item.IsDirectory);
 
         TypeLabel = item.IsDirectory ? "文件夹" : "文件";
         _isPinned = isPinned;
@@ -128,7 +129,72 @@ public sealed class RecentItemViewModel : INotifyPropertyChanged
     /// <summary>Access time behind <see cref="RelativeTime"/>, kept for snapshots.</summary>
     public DateTimeOffset LastAccessTime => _lastAccess;
 
-    public string RelativeTime => FormatRelative(_lastAccess);
+    /// <summary>
+    /// Take a newer access time from a scan.
+    ///
+    /// This is what makes "打开时间" follow a file that is opened again. The scan
+    /// reports the best evidence it has (Core's OpenTimeTracker derives it from MRU
+    /// movement, because Windows stores no per-file open time), but this row object is
+    /// REUSED across scans to keep its cached icon and bindings, and an earlier
+    /// version stored the time in a readonly field - so the row kept the timestamp it
+    /// was born with for the whole session. The list reordered correctly while every
+    /// entry still claimed to be days old.
+    ///
+    /// Only forward in time: a snapshot row can carry a newer value than a scan that
+    /// raced slightly behind it, and the clock must never walk backwards on screen.
+    /// </summary>
+    public void UpdateLastAccess(DateTimeOffset value)
+    {
+        bool changed = false;
+
+        if (value > _lastAccess)
+        {
+            _lastAccess = value;
+            changed = true;
+        }
+
+        // A scan is the authoritative record, so once it covers this session's own
+        // open there is nothing left for the optimistic value to say.
+        if (_openedAt is { } opened && value >= opened)
+        {
+            _openedAt = null;
+            changed = true;
+        }
+
+        if (!changed)
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(LastAccessTime));
+        OnPropertyChanged(nameof(RelativeTime));
+    }
+
+    /// <summary>
+    /// Mark the row as opened right now, from the panel itself.
+    ///
+    /// The click is the most reliable signal available - it is certain, where a
+    /// rescan has to infer the same fact from a timestamp - so the row is moved to
+    /// "刚刚" immediately instead of after the debounce.
+    ///
+    /// Held SEPARATELY from the recorded time, and deliberately so. Windows writes the
+    /// record asynchronously and may not write it at all (recent-items tracking off,
+    /// or a target the shell does not record). Folding the optimistic value into
+    /// <see cref="LastAccessTime"/> looked identical on screen but let a guess into the
+    /// startup snapshot, and the "never walk backwards" rule above then kept it there
+    /// for good: a file whose record says yesterday displayed "3 分钟前" even after a
+    /// full rescan. This field never reaches the snapshot, so a guess cannot outlive
+    /// the session that made it.
+    /// </summary>
+    public void MarkOpened()
+    {
+        _openedAt = DateTimeOffset.Now;
+        OnPropertyChanged(nameof(RelativeTime));
+    }
+
+    public string RelativeTime => FormatRelative(_openedAt is { } opened && opened > _lastAccess
+        ? opened
+        : _lastAccess);
 
     /// <summary>True when the target is gone; the row is dimmed and struck through.</summary>
     public bool IsMissing => Validity != ItemValidity.Valid;
@@ -305,7 +371,7 @@ public partial class MainWindow : Window
         // AllowsTransparency uses a layered HWND. A native Accent/DWM backdrop behind
         // that HWND becomes an opaque white or black backing surface, defeating the
         // per-pixel transparency. The transparent XAML surface is the backdrop here.
-        DegradedText.Text = string.Empty;
+        ClearDegradedText();
 
         RefreshRowStyles();
     }
@@ -522,7 +588,40 @@ public partial class MainWindow : Window
 
         // Do not apply a native backdrop to an AllowsTransparency window. It would
         // supply the opaque backing colour that the user is trying to remove.
-        DegradedText.Text = string.Empty;
+        ClearDegradedText();
+
+        // Say it once, on the visible surface: a restricted token silently breaks
+        // opening files and the tray icon, and the raw Win32 text ("Access is denied")
+        // sends the reader looking for a permissions problem on the FILE.
+        //
+        // Measured in such a context: Shell_NotifyIcon(NIM_ADD) returns FALSE, so the
+        // tray icon is never shown; ShellExecute is refused for directories and for
+        // files handled by a packaged app (png -> Photos), while plain documents still
+        // open; and any explorer.exe spawned from here dies with 0xc0000142. None of
+        // that is fixable from inside the process, so the button next to this text is
+        // the way out.
+        if (RunContext.IsRestricted)
+        {
+            DegradedText.Text = "受限环境：托盘与打开文件被系统拒绝";
+            DegradedText.ToolTip = "当前进程完整性级别为 low（通常由沙箱或受限启动器拉起），"
+                + "因此系统拒绝注册托盘图标，也会拒绝打开文件夹和系统应用处理的文件。"
+                + "点击右侧按钮，由系统提权后以正常权限重启。";
+            ElevateButton.Visibility = Visibility.Visible;
+        }
+    }
+
+    /// <summary>
+    /// Clear the status-bar diagnostic, unless it is carrying the run-context warning,
+    /// which stays for the life of the process rather than being wiped by a settings
+    /// change.
+    /// </summary>
+    private void ClearDegradedText()
+    {
+        if (!RunContext.IsRestricted)
+        {
+            DegradedText.Text = string.Empty;
+            DegradedText.ToolTip = null;
+        }
     }
 
     /// <summary>
@@ -935,6 +1034,12 @@ public partial class MainWindow : Window
                 // restart.
                 row.UpdateValidity(item.Validity);
                 row.UpdatePinned(isPinned);
+
+                // The scan may know a newer open time than the row was created with
+                // (Core derives it from MRU movement). Without this the row kept the
+                // time it was born with and the panel reordered correctly while still
+                // saying "3 天前".
+                row.UpdateLastAccess(item.LastAccessTime);
                 desired.Add(row);
             }
             else
@@ -1040,6 +1145,52 @@ public partial class MainWindow : Window
     {
         _ = RefreshAsync();
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// Restart with normal rights.
+    ///
+    /// The only way out of a restricted (low-integrity) launch: the shell refuses the
+    /// tray icon and shell activation for the whole process, and a process cannot
+    /// raise its own integrity level. Elevation needs the user's consent, which is why
+    /// this is a button and never something the app does on its own.
+    /// </summary>
+    private void OnElevateClick(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+
+        string? executable = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(executable))
+        {
+            StatusText.Text = "无法定位自身路径";
+            return;
+        }
+
+        try
+        {
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = executable,
+                UseShellExecute = true,
+                Verb = "runas",
+            };
+
+            // The successor waits for this instance's single-instance lock, so the two
+            // cannot race over it.
+            startInfo.ArgumentList.Add("--elevated-restart");
+
+            System.Diagnostics.Process.Start(startInfo);
+            Application.Current.Shutdown();
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            // ERROR_CANCELLED: the user declined the UAC prompt. Keep running.
+            StatusText.Text = "已取消提权，仍以受限权限运行";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = "无法以正常权限重启：" + ex.Message;
+        }
     }
 
     /// <summary>
@@ -1260,22 +1411,24 @@ public partial class MainWindow : Window
             return;
         }
 
-        try
+        // A folder is opened itself; a file is revealed in its parent. The file case
+        // goes through the shell API rather than a freshly spawned explorer.exe: see
+        // ShellLocate for why that distinction matters in a restricted context.
+        if (item.IsDirectory)
         {
-            string arguments = item.IsDirectory
-                ? $"\"{item.TargetPath}\""
-                : $"/select,\"{item.TargetPath}\"";
-
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            string? openError = TryShellOpen(item.TargetPath, item.TargetPath);
+            if (openError is not null)
             {
-                FileName = "explorer.exe",
-                Arguments = arguments,
-                UseShellExecute = true,
-            });
+                StatusText.Text = "无法打开所在位置：" + ExplainShellFailure(openError);
+            }
+
+            return;
         }
-        catch (Exception ex)
+
+        string? revealError = ShellLocate.TryReveal(item.TargetPath);
+        if (revealError is not null)
         {
-            StatusText.Text = "无法打开所在位置：" + ex.Message;
+            StatusText.Text = "无法打开所在位置：" + ExplainShellFailure(revealError);
         }
     }
 
@@ -1305,19 +1458,100 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Started from the target's OWN folder, like Explorer does. Leaving
+        // WorkingDirectory unset makes the child inherit our output folder, which both
+        // shows up in shell error text and is the wrong place for the app to start in.
+        string? workingDirectory = item.IsDirectory
+            ? item.TargetPath
+            : System.IO.Path.GetDirectoryName(item.TargetPath);
+
+        string? error = TryShellOpen(item.TargetPath, workingDirectory);
+        if (error is not null)
+        {
+            StatusText.Text = "无法打开：" + ExplainShellFailure(error);
+            return;
+        }
+
+        // Show the open immediately, then let the scan confirm it.
+        //
+        // The row would otherwise keep its old timestamp until the watchers notice the
+        // record change - up to a debounce later, or longer when only the registry is
+        // touched. A row that the user just opened still reading "3 天前" is exactly
+        // the complaint this addresses. MarkOpened is optimistic but not invented: the
+        // user did open it.
+        item.MarkOpened();
+        _ = ConfirmOpenAsync();
+    }
+
+    /// <summary>
+    /// Rescan shortly after an in-app open.
+    ///
+    /// Delayed rather than immediate: the shell writes the recent-items record
+    /// asynchronously once the target application has actually started, so an
+    /// immediate scan would usually still see the old record. This is a nudge on top
+    /// of the file/registry watchers, not a replacement for them.
+    /// </summary>
+    private async Task ConfirmOpenAsync()
+    {
         try
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            await Task.Delay(TimeSpan.FromSeconds(2)).ConfigureAwait(true);
+            await RefreshAsync();
+        }
+        catch (Exception)
+        {
+            // A missed confirmation is cosmetic; the watchers still cover it.
+        }
+    }
+
+    /// <summary>
+    /// Start <paramref name="path"/> through the shell, with the detected working
+    /// directory set to the item's own folder.
+    /// </summary>
+    private static string? TryShellOpen(string path, string? workingDirectory)
+    {
+        try
+        {
+            var startInfo = new System.Diagnostics.ProcessStartInfo
             {
-                FileName = item.TargetPath,
+                FileName = path,
                 UseShellExecute = true,
-            });
+            };
+
+            if (!string.IsNullOrEmpty(workingDirectory) && Directory.Exists(workingDirectory))
+            {
+                startInfo.WorkingDirectory = workingDirectory;
+            }
+
+            System.Diagnostics.Process.Start(startInfo);
+            return null;
         }
         catch (Exception ex)
         {
-            // Most common cause: no application is associated with the extension.
-            StatusText.Text = "无法打开：" + ex.Message;
+            return ex.Message;
         }
+    }
+
+    /// <summary>
+    /// Turn a raw shell failure into something a user can act on.
+    ///
+    /// "Access is denied" from ShellExecute almost never means the file is unreadable:
+    /// it means the calling process is restricted, and that is worth saying out loud
+    /// instead of leaving the user to guess.
+    /// </summary>
+    private static string ExplainShellFailure(string message)
+    {
+        bool denied = message.Contains("denied", StringComparison.OrdinalIgnoreCase)
+                      || message.Contains("拒绝访问", StringComparison.Ordinal);
+
+        if (!denied)
+        {
+            return message;
+        }
+
+        return RunContext.IsRestricted
+            ? message + "（当前进程运行在受限环境中，请从资源管理器正常启动 RecentDock）"
+            : message + "（可能被系统策略或安全软件拦截）";
     }
 
     private void OnCloseClick(object sender, RoutedEventArgs e)

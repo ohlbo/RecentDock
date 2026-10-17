@@ -1,6 +1,7 @@
 using Microsoft.Win32;
 using RecentDock.Core.Interop;
 using RecentDock.Core.Parsing;
+using RecentDock.Core.Storage;
 
 namespace RecentDock.Core;
 
@@ -70,7 +71,13 @@ public sealed class RecentScanner
             () => ScanLinks(linkFiles, registry, options, ref unresolved),
             cancellationToken).ConfigureAwait(false);
 
-        IReadOnlyList<RecentItem> ordered = Order(items, options);
+        // Replace the "record was created" timestamp with the best known "last opened"
+        // time. Neither source stores one, so it is derived from MRU movement and kept
+        // across runs - see OpenTimeTracker for the rules and their limits. Applied
+        // before ordering so the derived times can also break rank ties.
+        IReadOnlyList<RecentItem> timed = OpenTimeTracker.Apply(items, registry.RecordCount, DateTimeOffset.Now);
+
+        IReadOnlyList<RecentItem> ordered = Order(timed, options);
 
         return new RecentScanResult
         {
@@ -145,7 +152,7 @@ public sealed class RecentScanner
     /// path. The final tiebreaker matters: several files opened within the same
     /// second would otherwise reshuffle on every refresh and make the list flicker.
     /// </summary>
-    private static List<RecentItem> Order(List<RecentItem> items, RecentScannerOptions options)
+    private static List<RecentItem> Order(IReadOnlyList<RecentItem> items, RecentScannerOptions options)
     {
         return items
             .OrderBy(i => i.MruRank ?? int.MaxValue)

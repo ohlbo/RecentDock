@@ -25,7 +25,7 @@ namespace RecentDock.Core.Interop;
 public static class ShellIconProvider
 {
     private const uint SHGFI_ICON = 0x000000100;
-    private const uint SHGFI_SMALLICON = 0x000000001;
+    private const uint SHGFI_LARGEICON = 0x000000000;
     private const uint SHGFI_USEFILEATTRIBUTES = 0x000000010;
 
     private const uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
@@ -34,7 +34,7 @@ public static class ShellIconProvider
     /// <summary>Key for the shared folder icon.</summary>
     private const string FolderKey = "<dir>";
 
-    /// <summary>Key for the generic file icon, used for unknown or absent targets.</summary>
+    /// <summary>Key for the generic file icon, used when the name carries no extension.</summary>
     private const string UnknownFileKey = "<file>";
 
     private static readonly Dictionary<string, BitmapSource?> Cache = new(StringComparer.OrdinalIgnoreCase);
@@ -47,30 +47,23 @@ public static class ShellIconProvider
     /// </summary>
     /// <param name="extension">Extension including the dot, e.g. ".pdf".</param>
     /// <param name="isDirectory">True to force the folder icon.</param>
-    /// <param name="targetExists">
-    /// When false the generic icon is used: asking the shell for the icon of a
-    /// path that no longer exists would make it resolve a nonexistent item.
-    /// </param>
-    public static BitmapSource? GetIcon(string extension, bool isDirectory, bool targetExists)
+    public static BitmapSource? GetIcon(string extension, bool isDirectory)
     {
-        string key;
-        uint attributes;
-
-        if (isDirectory)
-        {
-            key = FolderKey;
-            attributes = FILE_ATTRIBUTE_DIRECTORY;
-        }
-        else if (!targetExists || string.IsNullOrEmpty(extension))
-        {
-            key = UnknownFileKey;
-            attributes = FILE_ATTRIBUTE_NORMAL;
-        }
-        else
-        {
-            key = extension;
-            attributes = FILE_ATTRIBUTE_NORMAL;
-        }
+        // The cache key is the EXTENSION for every file, including rows whose target
+        // is missing or unreachable.
+        //
+        // That is the whole point of this method, and it is not an optimisation
+        // detail: an earlier version keyed such rows on a single shared "<file>"
+        // slot while still resolving the icon from the ROW'S OWN extension. The first
+        // row created cached its icon under that shared key, and every row of a
+        // different type afterwards was served the first row's icon. Rows restored
+        // from the startup snapshot are all created in that state, so after a restart
+        // png, mp4, md and xopp entries showed each other's icons - the reported
+        // "图标出现错误" bug. Keying on the extension makes the cache entry describe
+        // exactly what is being cached.
+        string key = isDirectory
+            ? FolderKey
+            : string.IsNullOrEmpty(extension) ? UnknownFileKey : extension;
 
         lock (CacheLock)
         {
@@ -79,23 +72,37 @@ public static class ShellIconProvider
                 return cached;
             }
 
-            BitmapSource? bitmap = Load(extension, attributes);
+            BitmapSource? bitmap = Load(extension, isDirectory);
             Cache[key] = bitmap;
             return bitmap;
         }
     }
 
-    private static BitmapSource? Load(string extension, uint attributes)
+    /// <summary>
+    /// Ask the shell for one icon.
+    ///
+    /// SHGFI_USEFILEATTRIBUTES makes the shell resolve the icon from the extension
+    /// alone, without touching the filesystem. That is deliberate: the panel runs on
+    /// a background scan of paths that may sit on an offline share, and stat-ing each
+    /// one to fetch an icon would stall the list. The association itself (including a
+    /// per-user default app) is still honoured - it is keyed by extension either way.
+    ///
+    /// The LARGE (32 px) variant is requested rather than the 16 px one, because the
+    /// row icon size is user-adjustable up to 48 px: starting from 32 keeps that
+    /// scaling soft rather than blocky, and 32 downscaled to the 16 px default stays
+    /// sharp.
+    /// </summary>
+    private static BitmapSource? Load(string extension, bool isDirectory)
     {
-        string probeName = attributes == FILE_ATTRIBUTE_DIRECTORY ? "folder" : "file" + extension;
+        string probeName = isDirectory ? "folder" : "file" + extension;
 
         var info = new SHFILEINFO();
         IntPtr result = SHGetFileInfo(
             probeName,
-            attributes,
+            isDirectory ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL,
             ref info,
             (uint)Marshal.SizeOf<SHFILEINFO>(),
-            SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES);
+            SHGFI_ICON | SHGFI_LARGEICON | SHGFI_USEFILEATTRIBUTES);
 
         if (result == IntPtr.Zero || info.hIcon == IntPtr.Zero)
         {

@@ -46,6 +46,9 @@ public static class AppPaths
 
     public static string FavoritesFile => Path.Combine(StateDirectory, "favorites.json");
 
+    /// <summary>Last-open times derived from MRU movement, see OpenTimeTracker.</summary>
+    public static string OpenTimesFile => Path.Combine(StateDirectory, "open-times.json");
+
     /// <summary>
     /// Ensure the state directory exists. Returns false when it cannot be created,
     /// in which case callers degrade to in-memory defaults rather than failing.
@@ -188,6 +191,16 @@ public sealed record UiSettings
     /// One run settles a question that several rounds of attribute inspection did not.
     /// </summary>
     public bool OpaquePanel { get; init; }
+
+    /// <summary>
+    /// The user declined the automatic UAC prompt for running with a normal token.
+    ///
+    /// Recorded so a restricted session is not asked on every start. It does NOT hide
+    /// the problem: the status bar keeps explaining and keeps offering the manual
+    /// "以正常权限重启" button, so the choice can still be reversed without editing
+    /// this file.
+    /// </summary>
+    public bool AutoElevateDeclined { get; init; }
 
     /// <summary>
     /// Keep the window styles that DWM needs in order to render the system backdrop.

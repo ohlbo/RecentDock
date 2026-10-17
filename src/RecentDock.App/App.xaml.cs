@@ -103,7 +103,14 @@ public partial class App : Application
         // Single instance must be checked before any window or tray icon is created,
         // otherwise the duplicate would flash a panel and add a second tray icon
         // before exiting.
-        if (!SingleInstance.TryAcquire())
+        //
+        // The elevated relaunch (status-bar button when running restricted) is started
+        // by the instance it replaces, so it is expected to overlap with it briefly;
+        // that one waits for the lock instead of exiting immediately.
+        bool elevatedRestart = e.Args.Any(
+            a => string.Equals(a, "--elevated-restart", StringComparison.OrdinalIgnoreCase));
+
+        if (!SingleInstance.TryAcquire(elevatedRestart ? TimeSpan.FromSeconds(8) : TimeSpan.Zero))
         {
             Shutdown();
             return;
@@ -116,6 +123,23 @@ public partial class App : Application
             (int)SystemParameters.VirtualScreenTop,
             (int)SystemParameters.VirtualScreenWidth,
             (int)SystemParameters.VirtualScreenHeight);
+
+        // FIRST launch from a restricted context: ask Windows for a normal token right
+        // away, before anything is drawn.
+        //
+        // Why this cannot be silent: a process cannot raise its own integrity level.
+        // The token is assigned when the process is created, and the only way to get a
+        // better one is for Windows to create a NEW process on the user's behalf - which
+        // requires the user's consent through UAC. There is no API that upgrades "me".
+        // So the honest implementation is: detect it at startup, relaunch through UAC,
+        // and get out of the way. Doing it here rather than in the window keeps the
+        // panel from flashing and then vanishing.
+        if (!elevatedRestart && TryElevateOnStartup())
+        {
+            Shutdown();
+            return;
+        }
+
         ThemeManager.Apply(_settings);
 
         CreateWindow();
@@ -128,6 +152,62 @@ public partial class App : Application
         _tray.Initialize();
 
         UpdateTrayState();
+    }
+
+    /// <summary>
+    /// Relaunch through UAC when this process started with a restricted token.
+    ///
+    /// Returns true when a successor was started and this process should exit.
+    ///
+    /// The three checks are all deliberate:
+    ///
+    ///   * only when restricted - a normal launch (the common case) never prompts;
+    ///   * only once - if the user cancelled the UAC prompt last time, the choice is
+    ///     remembered and the panel continues with the in-window "以正常权限重启"
+    ///     button instead of nagging on every start;
+    ///   * never for the successor itself - it carries --elevated-restart, so a failed
+    ///     elevation cannot turn into a launch loop.
+    /// </summary>
+    private bool TryElevateOnStartup()
+    {
+        if (!RunContext.IsRestricted || _settings.AutoElevateDeclined)
+        {
+            return false;
+        }
+
+        string? executable = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(executable))
+        {
+            return false;
+        }
+
+        try
+        {
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = executable,
+                UseShellExecute = true,
+                Verb = "runas",
+            };
+
+            startInfo.ArgumentList.Add("--elevated-restart");
+            System.Diagnostics.Process.Start(startInfo);
+            return true;
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            // ERROR_CANCELLED: the user declined. Remember it so the next start goes
+            // straight to the panel instead of asking again.
+            _settings = _settings with { AutoElevateDeclined = true };
+            ConfigStore.Save(_settings);
+            return false;
+        }
+        catch (Exception)
+        {
+            // UAC unavailable (policy, no interactive desktop) or the exe is gone.
+            // Carry on restricted; the status bar explains and offers the button.
+            return false;
+        }
     }
 
     private void CreateWindow()
@@ -967,6 +1047,12 @@ public partial class App : Application
             RecentDock.Core.Storage.UiSettings ui = RecentDock.Core.Storage.ConfigStore.Load();
             Write($"  theme              : {(ui.UseDarkTheme ? "dark" : "light (white glass)")}, acrylic {(ui.UseAcrylicBackdrop ? "on" : "off")}");
             Write($"  state directory    : {RecentDock.Core.Storage.AppPaths.StateDirectory}");
+
+            // The integrity level explains a whole class of "it cannot open my files"
+            // reports: from a low-integrity token ShellExecute is refused and the tray
+            // icon is never shown, and nothing in the panel says why.
+            Write($"  run context        : {RunContext.Describe()}"
+                + (RunContext.IsRestricted ? "  <-- restricted: opening files and the tray icon will be refused" : string.Empty));
             Write($"  settings link      : {EnvironmentProbe.GetSettingsUri()}");
             Write($"  autostart entry    : {(AutoStart.IsEnabled() ? "present" : "absent")}");
             Write($"  tracking state     : {result.Tracking}");

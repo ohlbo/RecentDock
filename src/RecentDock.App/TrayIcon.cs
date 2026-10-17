@@ -179,20 +179,37 @@ public static class SingleInstance
     /// False when another instance is already running, in which case it has been
     /// signalled to show itself and the caller should exit immediately.
     /// </summary>
-    public static bool TryAcquire()
+    /// <param name="waitForExit">
+    /// How long to keep retrying before concluding that another instance really is
+    /// running. Used by the elevated relaunch: that process is started BY the instance
+    /// it replaces, so for a moment both exist, and the newcomer must wait for the lock
+    /// rather than give up - giving up would leave the user with nothing running.
+    /// </param>
+    public static bool TryAcquire(TimeSpan waitForExit = default)
     {
-        bool createdNew;
-        _mutex = new Mutex(initiallyOwned: false, MutexName, out createdNew);
+        DateTimeOffset deadline = DateTimeOffset.Now + waitForExit;
 
-        if (createdNew)
+        while (true)
         {
-            return true;
-        }
+            bool createdNew;
+            var mutex = new Mutex(initiallyOwned: false, MutexName, out createdNew);
 
-        SignalExistingInstance();
-        _mutex.Dispose();
-        _mutex = null;
-        return false;
+            if (createdNew)
+            {
+                _mutex = mutex;
+                return true;
+            }
+
+            mutex.Dispose();
+
+            if (DateTimeOffset.Now >= deadline)
+            {
+                SignalExistingInstance();
+                return false;
+            }
+
+            Thread.Sleep(150);
+        }
     }
 
     /// <summary>Register the window that second launches should activate.</summary>
