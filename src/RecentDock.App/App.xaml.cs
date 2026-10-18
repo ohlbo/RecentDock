@@ -124,22 +124,19 @@ public partial class App : Application
             (int)SystemParameters.VirtualScreenWidth,
             (int)SystemParameters.VirtualScreenHeight);
 
-        // FIRST launch from a restricted context: ask Windows for a normal token right
-        // away, before anything is drawn.
+        // Deliberately NO automatic elevation at startup, even when the token is
+        // restricted.
         //
-        // Why this cannot be silent: a process cannot raise its own integrity level.
-        // The token is assigned when the process is created, and the only way to get a
-        // better one is for Windows to create a NEW process on the user's behalf - which
-        // requires the user's consent through UAC. There is no API that upgrades "me".
-        // So the honest implementation is: detect it at startup, relaunch through UAC,
-        // and get out of the way. Doing it here rather than in the window keeps the
-        // panel from flashing and then vanishing.
-        if (!elevatedRestart && TryElevateOnStartup())
-        {
-            Shutdown();
-            return;
-        }
-
+        // It was tried and reverted: requesting elevation goes through the UAC/AppInfo
+        // path, and that path asks SmartScreen for the publisher's reputation. For an
+        // unsigned build - and equally for one signed with a self-signed certificate,
+        // whose publisher reputation is permanently zero - the result is a
+        // "Windows 已保护你的电脑" prompt on EVERY start. That is far worse than the
+        // problem it solved, because v0.5.1 (which never elevated) starts silently.
+        //
+        // The restricted case is still handled, just on request: the status bar says
+        // what is limited and offers "以正常权限重启", and that is the only moment a
+        // UAC prompt appears.
         ThemeManager.Apply(_settings);
 
         CreateWindow();
@@ -152,62 +149,6 @@ public partial class App : Application
         _tray.Initialize();
 
         UpdateTrayState();
-    }
-
-    /// <summary>
-    /// Relaunch through UAC when this process started with a restricted token.
-    ///
-    /// Returns true when a successor was started and this process should exit.
-    ///
-    /// The three checks are all deliberate:
-    ///
-    ///   * only when restricted - a normal launch (the common case) never prompts;
-    ///   * only once - if the user cancelled the UAC prompt last time, the choice is
-    ///     remembered and the panel continues with the in-window "以正常权限重启"
-    ///     button instead of nagging on every start;
-    ///   * never for the successor itself - it carries --elevated-restart, so a failed
-    ///     elevation cannot turn into a launch loop.
-    /// </summary>
-    private bool TryElevateOnStartup()
-    {
-        if (!RunContext.IsRestricted || _settings.AutoElevateDeclined)
-        {
-            return false;
-        }
-
-        string? executable = Environment.ProcessPath;
-        if (string.IsNullOrEmpty(executable))
-        {
-            return false;
-        }
-
-        try
-        {
-            var startInfo = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = executable,
-                UseShellExecute = true,
-                Verb = "runas",
-            };
-
-            startInfo.ArgumentList.Add("--elevated-restart");
-            System.Diagnostics.Process.Start(startInfo);
-            return true;
-        }
-        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
-        {
-            // ERROR_CANCELLED: the user declined. Remember it so the next start goes
-            // straight to the panel instead of asking again.
-            _settings = _settings with { AutoElevateDeclined = true };
-            ConfigStore.Save(_settings);
-            return false;
-        }
-        catch (Exception)
-        {
-            // UAC unavailable (policy, no interactive desktop) or the exe is gone.
-            // Carry on restricted; the status bar explains and offers the button.
-            return false;
-        }
     }
 
     private void CreateWindow()

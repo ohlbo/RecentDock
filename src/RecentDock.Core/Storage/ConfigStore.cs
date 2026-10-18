@@ -193,16 +193,6 @@ public sealed record UiSettings
     public bool OpaquePanel { get; init; }
 
     /// <summary>
-    /// The user declined the automatic UAC prompt for running with a normal token.
-    ///
-    /// Recorded so a restricted session is not asked on every start. It does NOT hide
-    /// the problem: the status bar keeps explaining and keeps offering the manual
-    /// "以正常权限重启" button, so the choice can still be reversed without editing
-    /// this file.
-    /// </summary>
-    public bool AutoElevateDeclined { get; init; }
-
-    /// <summary>
     /// Keep the window styles that DWM needs in order to render the system backdrop.
     ///
     /// True by default, and the default matters: clearing WS_THICKFRAME removes the
