@@ -132,11 +132,52 @@ public static class OpenTimeTracker
     {
         ArgumentNullException.ThrowIfNull(items);
 
-        OpenTimeState previous = OpenTimeStore.Load();
-        (IReadOnlyList<RecentItem> updated, OpenTimeState state) = Observe(items, recordCount, previous, now);
-        OpenTimeStore.Save(state);
-        return updated;
+        lock (Gate)
+        {
+            OpenTimeState previous = OpenTimeStore.Load();
+            (IReadOnlyList<RecentItem> updated, OpenTimeState state) = Observe(items, recordCount, previous, now);
+            OpenTimeStore.Save(state);
+            return updated;
+        }
     }
+
+    /// <summary>
+    /// Record that the panel itself just opened <paramref name="targetPath"/>.
+    ///
+    /// A click is the strongest evidence available: it is certain, where a rescan has to
+    /// infer the same fact from a rank change. Recording it HERE - rather than only in
+    /// the row - is what makes it survive a restart, and it is why the row no longer
+    /// needs a separate "optimistic" timestamp that had to be kept out of the snapshot.
+    ///
+    /// Reopening an item that is already first in its MRU list produces no rank change,
+    /// so without this the panel shows the new time until the next start and then falls
+    /// back to the record's creation time - reported as "重启后打开时间回到第一次打开".
+    /// </summary>
+    public static void RecordOpen(string targetPath, DateTimeOffset at)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetPath);
+
+        lock (Gate)
+        {
+            OpenTimeState state = OpenTimeStore.Load();
+
+            var entries = new Dictionary<string, OpenTimeEntry>(state.Entries, StringComparer.OrdinalIgnoreCase);
+            entries.TryGetValue(targetPath, out OpenTimeEntry? prior);
+
+            entries[targetPath] = new OpenTimeEntry
+            {
+                // An entry created here has no rank yet; the next scan fills it in.
+                Rank = prior?.Rank,
+                OpenedAt = at,
+                LastSeenAt = at,
+            };
+
+            OpenTimeStore.Save(state with { Entries = entries });
+        }
+    }
+
+    /// <summary>Serialises state-file access between the UI thread and the scan thread.</summary>
+    private static readonly object Gate = new();
 
     /// <summary>
     /// Pure core of <see cref="Apply"/>, so the rules can be tested without disk IO.

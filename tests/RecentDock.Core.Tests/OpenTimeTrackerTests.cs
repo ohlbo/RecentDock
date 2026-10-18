@@ -189,6 +189,103 @@ public sealed class OpenTimeTrackerTests
 
     // ---------------------------------------------------------- persistence
 
+    /// <summary>
+    /// The reported bug: opening an item from the panel showed "刚刚" only until the
+    /// app was restarted, because the click lived in the row and the Windows record
+    /// never moved (the item was already at the top of its MRU list).
+    /// </summary>
+    [Fact]
+    public void PanelOpen_IsStillThereAfterARestart()
+    {
+        WithTempState(directory =>
+        {
+            const string path = @"C:\docs\already-on-top.pdf";
+
+            OpenTimeTracker.RecordOpen(path, Now);
+
+            // A restart is exactly this: the next scan starts from whatever the file
+            // holds, with no help from any in-memory state.
+            OpenTimeState afterRestart = OpenTimeStore.Load();
+            RecentItem item = Item(path, rank: 1, recordTime: Now.AddDays(-30));
+
+            (IReadOnlyList<RecentItem> result, OpenTimeState state) = OpenTimeTracker.Observe(
+                new[] { item }, recordCount: 100, afterRestart, Now.AddMinutes(3));
+
+            Assert.Equal(Now, result[0].LastAccessTime);
+            Assert.Equal(Now, state.Entries[path].OpenedAt);
+        });
+    }
+
+    [Fact]
+    public void PanelOpen_KeepsItsTimeAcrossRepeatedScans()
+    {
+        WithTempState(_ =>
+        {
+            const string path = @"C:\docs\a.pdf";
+            OpenTimeTracker.RecordOpen(path, Now);
+
+            DateTimeOffset scanTime = Now;
+            for (int i = 0; i < 3; i++)
+            {
+                (IReadOnlyList<RecentItem> result, OpenTimeState state) = OpenTimeTracker.Observe(
+                    new[] { Item(path, rank: 5, recordTime: Now.AddDays(-9)) },
+                    recordCount: 100,
+                    previous: OpenTimeStore.Load(),
+                    now: scanTime);
+
+                Assert.Equal(Now, result[0].LastAccessTime);
+
+                OpenTimeStore.Save(state);
+                scanTime = scanTime.AddMinutes(1);
+            }
+        });
+    }
+
+    [Fact]
+    public void PanelOpen_DoesNotOutrankANewerScanResult()
+    {
+        WithTempState(directory =>
+        {
+            const string path = @"C:\docs\a.pdf";
+            OpenTimeTracker.RecordOpen(path, Now.AddDays(-2));
+
+            (IReadOnlyList<RecentItem> result, _) = OpenTimeTracker.Observe(
+                new[] { Item(path, rank: 5, recordTime: Now) },
+                recordCount: 100,
+                OpenTimeStore.Load(),
+                Now);
+
+            Assert.Equal(Now, result[0].LastAccessTime);
+        });
+    }
+
+    /// <summary>Runs a test body against a private state directory.</summary>
+    private static void WithTempState(Action<string> body)
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "RecentDock-opentime-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        string? original = AppPaths.StateDirectoryOverride;
+
+        try
+        {
+            AppPaths.StateDirectoryOverride = directory;
+            body(directory);
+        }
+        finally
+        {
+            AppPaths.StateDirectoryOverride = original;
+
+            try
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+            catch (Exception)
+            {
+                // Best effort cleanup.
+            }
+        }
+    }
+
     [Fact]
     public void Store_RoundTripsAndMatchesPathsCaseInsensitively()
     {

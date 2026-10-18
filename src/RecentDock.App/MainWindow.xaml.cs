@@ -26,7 +26,6 @@ namespace RecentDock.App;
 public sealed class RecentItemViewModel : INotifyPropertyChanged
 {
     private DateTimeOffset _lastAccess;
-    private DateTimeOffset? _openedAt;
     private bool _isPinned;
 
     public RecentItemViewModel(RecentItem item, bool isPinned = false)
@@ -145,56 +144,17 @@ public sealed class RecentItemViewModel : INotifyPropertyChanged
     /// </summary>
     public void UpdateLastAccess(DateTimeOffset value)
     {
-        bool changed = false;
-
-        if (value > _lastAccess)
-        {
-            _lastAccess = value;
-            changed = true;
-        }
-
-        // A scan is the authoritative record, so once it covers this session's own
-        // open there is nothing left for the optimistic value to say.
-        if (_openedAt is { } opened && value >= opened)
-        {
-            _openedAt = null;
-            changed = true;
-        }
-
-        if (!changed)
+        if (value <= _lastAccess)
         {
             return;
         }
 
+        _lastAccess = value;
         OnPropertyChanged(nameof(LastAccessTime));
         OnPropertyChanged(nameof(RelativeTime));
     }
 
-    /// <summary>
-    /// Mark the row as opened right now, from the panel itself.
-    ///
-    /// The click is the most reliable signal available - it is certain, where a
-    /// rescan has to infer the same fact from a timestamp - so the row is moved to
-    /// "刚刚" immediately instead of after the debounce.
-    ///
-    /// Held SEPARATELY from the recorded time, and deliberately so. Windows writes the
-    /// record asynchronously and may not write it at all (recent-items tracking off,
-    /// or a target the shell does not record). Folding the optimistic value into
-    /// <see cref="LastAccessTime"/> looked identical on screen but let a guess into the
-    /// startup snapshot, and the "never walk backwards" rule above then kept it there
-    /// for good: a file whose record says yesterday displayed "3 分钟前" even after a
-    /// full rescan. This field never reaches the snapshot, so a guess cannot outlive
-    /// the session that made it.
-    /// </summary>
-    public void MarkOpened()
-    {
-        _openedAt = DateTimeOffset.Now;
-        OnPropertyChanged(nameof(RelativeTime));
-    }
-
-    public string RelativeTime => FormatRelative(_openedAt is { } opened && opened > _lastAccess
-        ? opened
-        : _lastAccess);
+    public string RelativeTime => FormatRelative(_lastAccess);
 
     /// <summary>True when the target is gone; the row is dimmed and struck through.</summary>
     public bool IsMissing => Validity != ItemValidity.Valid;
@@ -1472,14 +1432,17 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Show the open immediately, then let the scan confirm it.
+        // Show the open immediately, and make it survive a restart.
         //
-        // The row would otherwise keep its old timestamp until the watchers notice the
-        // record change - up to a debounce later, or longer when only the registry is
-        // touched. A row that the user just opened still reading "3 天前" is exactly
-        // the complaint this addresses. MarkOpened is optimistic but not invented: the
-        // user did open it.
-        item.MarkOpened();
+        // Two things are needed, and doing only the first was the bug behind "打开时间在
+        // 重启后回到第一次打开的时间": the row alone is memory that dies with the
+        // process, while the Windows record only moves when the item was not already at
+        // the top of its MRU list. So the click is also written into the tracker's state
+        // file, which every later scan reads back.
+        DateTimeOffset openedAt = DateTimeOffset.Now;
+        OpenTimeTracker.RecordOpen(item.TargetPath, openedAt);
+        item.UpdateLastAccess(openedAt);
+
         _ = ConfirmOpenAsync();
     }
 
