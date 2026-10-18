@@ -107,6 +107,20 @@ RecentDock **不会在启动时自动提权**（提权路径会让 SmartScreen �
 只有你主动点击时才会出现 UAC。
 `dist\RecentDock.exe --selftest` 的输出里也有 `run context` 一行可用于确认当前权限级别。
 
+### 启动时被 SmartScreen 拦住？
+
+未签名（或只有自签名证书）的程序，在开启了"检查应用和文件"的系统上会被拦一次：
+
+> Windows 已保护你的电脑 — Microsoft Defender SmartScreen 阻止了无法识别的应用启动
+
+签名只能把"未知发布者"换成具体名字，**不能**产生发布者信誉，所以拦不拦与签名无关。
+如果只是本机自用，可以在 **Windows 安全中心 → 应用和浏览器控制 → 基于信誉的保护** 里关掉
+**"检查应用和文件"**（等价于 `HKCU\Software\Microsoft\Windows\CurrentVersion\AppHost`
+下 `EnableWebContentEvaluation = 0`），随时可以改回来。
+
+程序本身**不会在启动时请求提权**，正是为了避免触发这条检查 —— 只有你点状态栏的
+"以正常权限重启"时才会出现 UAC。
+
 ## 数据来源与隐私
 
 RecentDock 读取 Windows 当前用户的 Recent 目录以及相关的本地最近项目记录。程序不会上传文件内容、文件地址或使用记录。
