@@ -124,19 +124,27 @@ public partial class App : Application
             (int)SystemParameters.VirtualScreenWidth,
             (int)SystemParameters.VirtualScreenHeight);
 
-        // Deliberately NO automatic elevation at startup, even when the token is
-        // restricted.
+        // Automatic elevation, but only where it cannot interrupt the user.
         //
-        // It was tried and reverted: requesting elevation goes through the UAC/AppInfo
-        // path, and that path asks SmartScreen for the publisher's reputation. For an
-        // unsigned build - and equally for one signed with a self-signed certificate,
-        // whose publisher reputation is permanently zero - the result is a
-        // "Windows 已保护你的电脑" prompt on EVERY start. That is far worse than the
-        // problem it solved, because v0.5.1 (which never elevated) starts silently.
+        // The rule is deliberately narrow. Elevating is the only way to recover a
+        // restricted start, but the request goes through the UAC/AppInfo path, which
+        // also asks SmartScreen for the publisher's reputation - on a locally built
+        // binary that answer is always "unknown", so the START is gated on that prompt.
+        // Two conditions therefore gate it here:
         //
-        // The restricted case is still handled, just on request: the status bar says
-        // what is limited and offers "以正常权限重启", and that is the only moment a
-        // UAC prompt appears.
+        //   * the machine elevates without a UAC dialog (ConsentPromptBehaviorAdmin = 0),
+        //     otherwise every start would nag; and
+        //   * this is not already the elevated successor, so a failure cannot loop.
+        //
+        // What remains is SmartScreen, which runs regardless of UAC. With it enabled
+        // the user sees "仍要运行" on every start; the README documents turning it off
+        // for a locally built, self-signed binary.
+        if (!elevatedRestart && TryElevateOnStartup())
+        {
+            Shutdown();
+            return;
+        }
+
         ThemeManager.Apply(_settings);
 
         CreateWindow();
@@ -149,6 +157,49 @@ public partial class App : Application
         _tray.Initialize();
 
         UpdateTrayState();
+    }
+
+    /// <summary>
+    /// Relaunch through UAC when this process started with a restricted token and the
+    /// machine grants elevation silently. Returns true when a successor was started and
+    /// this process should exit.
+    ///
+    /// Both conditions matter: restricted tokens lose the tray icon and the ability to
+    /// open folders, and a machine that shows a UAC dialog would turn every start into a
+    /// nag. See the call site for the full reasoning.
+    /// </summary>
+    private bool TryElevateOnStartup()
+    {
+        if (!RunContext.IsRestricted || !RunContext.ElevationIsSilent)
+        {
+            return false;
+        }
+
+        string? executable = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(executable))
+        {
+            return false;
+        }
+
+        try
+        {
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = executable,
+                UseShellExecute = true,
+                Verb = "runas",
+            };
+
+            startInfo.ArgumentList.Add("--elevated-restart");
+            System.Diagnostics.Process.Start(startInfo);
+            return true;
+        }
+        catch (Exception)
+        {
+            // Declined, blocked by policy, or no interactive desktop. Carry on
+            // restricted: the status bar explains and offers the button.
+            return false;
+        }
     }
 
     private void CreateWindow()

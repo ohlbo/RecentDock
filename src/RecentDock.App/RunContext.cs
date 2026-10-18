@@ -104,6 +104,38 @@ public static class RunContext
         _ => "system",
     };
 
+    /// <summary>
+    /// True when asking Windows for a better token would happen WITHOUT a UAC dialog.
+    ///
+    /// This is what makes automatic elevation acceptable rather than a nag. With the
+    /// default UAC setting every start would raise a consent prompt, so the panel must
+    /// not do it. Where administrators are set to "never notify"
+    /// (<c>ConsentPromptBehaviorAdmin = 0</c>), elevation is granted silently and the
+    /// panel can fix its own restricted start without interrupting anything.
+    ///
+    /// Note that this covers the UAC dialog only. SmartScreen's app-reputation check
+    /// runs on the elevation path regardless, which is why the check has to be off for
+    /// a truly silent start - see README.
+    /// </summary>
+    public static bool ElevationIsSilent => ConsentPromptBehaviorAdmin is 0;
+
+    private static readonly int? ConsentPromptBehaviorAdmin = ReadConsentPromptBehaviorAdmin();
+
+    private static int? ReadConsentPromptBehaviorAdmin()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System");
+
+            return key?.GetValue("ConsentPromptBehaviorAdmin") is int value ? value : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr GetCurrentProcess();
 

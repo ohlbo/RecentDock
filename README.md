@@ -102,9 +102,13 @@ powershell -ExecutionPolicy Bypass -File tools\sign.ps1
 
 程序能做的只有一半：进程**无法**提升自己的完整性级别，令牌是创建时由父进程给的，
 提升的唯一方式是让 Windows 以你的身份新建一个进程——而这必须经过 UAC 同意。
-RecentDock **不会在启动时自动提权**（提权路径会让 SmartScreen 每次都拦一次）；
-状态栏会提示"受限环境：托盘与打开文件被系统拒绝"，并给出**"以正常权限重启"**按钮，
-只有你主动点击时才会出现 UAC。
+
+因此 RecentDock 的自动提权有一个明确前提：**只在系统配置为"不弹 UAC 确认"时**
+（`ConsentPromptBehaviorAdmin = 0`）才在启动时自动提权重启；普通 UAC 配置下不会打断你，
+只在状态栏提示"受限环境"并给出**"以正常权限重启"**按钮，点它才会提权。
+
+注意：提权路径还会经过 SmartScreen 的应用信誉检查。本机构建的程序信誉恒为 0，
+所以即使 UAC 不提示，仍可能每次启动都弹"仍要运行"——处理办法见下一节。
 `dist\RecentDock.exe --selftest` 的输出里也有 `run context` 一行可用于确认当前权限级别。
 
 ### 启动时被 SmartScreen 拦住？
