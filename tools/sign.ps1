@@ -129,6 +129,25 @@ if ($signature.Status -ne 'Valid') {
     exit 1
 }
 
+# Mark the output as belonging to the Local Machine zone.
+#
+# A freshly built binary in a folder the shell does not consider trusted can raise the
+# attachment warning ("打开文件 - 安全警告 / 来自 Internet 的文件") even when it carries
+# no Mark of the Web at all - the classification then comes from somewhere the file
+# itself does not show. An explicit ZoneId=0 states what is actually true (this file was
+# built here) and stops the prompt.
+#
+# Written AFTER signing on purpose: adding an alternate data stream does not touch the
+# signed image, so the signature stays valid (verified).
+try {
+    Set-Content -LiteralPath $exePath -Stream 'Zone.Identifier' `
+        -Value "[ZoneTransfer]`r`nZoneId=0" -Encoding Ascii -NoNewline -ErrorAction Stop
+    Write-Step 'zone   : marked Local (ZoneId=0)'
+}
+catch {
+    Write-Step "zone   : could not be marked ($($_.Exception.Message))"
+}
+
 Write-Host ""
 Write-Host "Done. The executable is signed and trusted on this machine." -ForegroundColor Green
 Write-Host "Re-run this script after every publish; a rebuild produces an unsigned binary again."
