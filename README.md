@@ -96,6 +96,20 @@ powershell -ExecutionPolicy Bypass -File tools\sign.ps1
 .\run.cmd
 ```
 
+但**更推荐装到用户目录再从快捷方式启动**：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\install-local.ps1
+```
+
+它会把发布产物复制到 `%LOCALAPPDATA%\RecentDock\App\`，在桌面和开始菜单创建快捷方式，
+并把开机自启项指向安装后的副本。
+
+为什么要多这一步：在某些环境里（例如本仓库所在的工作区目录被判定为不可信来源），
+**直接从构建目录运行会触发"打开文件 - 安全警告"**，提示"来自 Internet 的文件"——
+即使文件本身不带 Mark of the Web。同一份文件放到用户目录下就完全安静。
+`dist\` 本来就是可丢弃的构建输出，安装后的副本才是快捷方式、自启和快照真正指向的东西。
+
 请**从资源管理器双击启动**（或从开始菜单快捷方式）。不要在沙箱、受限终端或杀毒软件的
 "受限运行"里拉起它：那样程序会以低完整性令牌运行，Windows 会拒绝注册托盘图标，也会拒绝
 打开文件夹和由系统应用（如"照片"）处理的文件。
