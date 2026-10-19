@@ -45,8 +45,8 @@
        for it. -->
   <Border x:Name="FrameBorder"
           BorderBrush="{DynamicResource GlassBorderBrush}"
-          BorderThickness="1"
-          CornerRadius="12"
+          BorderThickness="{DynamicResource FrameBorderThickness}"
+          CornerRadius="{DynamicResource FrameCornerRadius}"
           Background="{DynamicResource GlassTintBrush}">
     <Grid>
       <Grid.RowDefinitions>
@@ -59,7 +59,7 @@
       <!-- ============================ header, doubles as the drag handle -->
       <Border Grid.Row="0"
               Background="{DynamicResource GlassHeaderBrush}"
-              CornerRadius="11,11,0,0"
+              CornerRadius="{DynamicResource FrameHeaderCornerRadius}"
               MouseLeftButtonDown="OnDragAreaMouseLeftButtonDown">
         <Grid Margin="12,6,8,6">
           <Grid.ColumnDefinitions>
@@ -165,7 +165,7 @@
                   <ControlTemplate TargetType="ListViewItem">
                     <Border x:Name="RowSurface"
                             Background="{TemplateBinding Background}"
-                            CornerRadius="7"
+                            CornerRadius="{DynamicResource RowCornerRadius}"
                             Padding="{TemplateBinding Padding}">
                       <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                         VerticalAlignment="Center" />
@@ -304,7 +304,7 @@
       <!-- ============================ status bar -->
       <Border Grid.Row="3"
               Background="{DynamicResource GlassHeaderBrush}"
-              CornerRadius="0,0,11,11"
+              CornerRadius="{DynamicResource FrameFooterCornerRadius}"
               Padding="12,4">
         <Grid>
           <Grid.ColumnDefinitions>

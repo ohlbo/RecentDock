@@ -326,7 +326,7 @@ public partial class MainWindow : Window
         // background is per-pixel transparent; ThemeManager changes only the white
         // panel surfaces drawn inside it.
         Opacity = 1.0;
-        ApplyDropShadow(settings.ShowDropShadow);
+        ApplyDropShadow(settings);
 
         // AllowsTransparency uses a layered HWND. A native Accent/DWM backdrop behind
         // that HWND becomes an opaque white or black backing surface, defeating the
@@ -534,7 +534,7 @@ public partial class MainWindow : Window
         // taskbar and Alt+Tab even after the native frame-style adjustments above.
         AcrylicBackdrop.EnsureTrayUtilityStyles(this);
 
-        ApplyDropShadow(_settings.ShowDropShadow);
+        ApplyDropShadow(_settings);
 
         // Diagnostic: replace the translucent glass with an opaque fill, so the panel
         // can be judged with the DWM material taken out of the picture entirely.
@@ -585,7 +585,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Add or remove the drop shadow.
+    /// Add or remove the drop shadow, using the softness the current style asks for.
     ///
     /// Deliberately not in the XAML. A Border.Effect makes WPF render the border into
     /// an intermediate surface, and in a chrome-less window that depends on the DWM
@@ -594,8 +594,10 @@ public partial class MainWindow : Window
     /// and lowering opacity only reveals more black. Applying it from code keeps it
     /// switchable per machine.
     /// </summary>
-    private void ApplyDropShadow(bool enabled)
+    private void ApplyDropShadow(UiSettings settings)
     {
+        (bool enabled, double blur, double shadowOpacity) = ThemeManager.ShadowFor(settings);
+
         if (!enabled)
         {
             FrameBorder.Effect = null;
@@ -604,9 +606,9 @@ public partial class MainWindow : Window
 
         FrameBorder.Effect = new System.Windows.Media.Effects.DropShadowEffect
         {
-            BlurRadius = 20,
+            BlurRadius = blur,
             ShadowDepth = 0,
-            Opacity = 0.28,
+            Opacity = shadowOpacity,
             Color = System.Windows.Media.Colors.Black,
         };
     }

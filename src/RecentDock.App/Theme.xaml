@@ -70,6 +70,29 @@
 
   <!--
     ============================================================================
+    Geometry
+    ============================================================================
+
+    Corner radii and edge weight are resources, not literals, because the theme styles
+    differ in exactly these values: glass is round and soft, flat is nearly square.
+    ThemeManager rewrites them on every Apply, and the XAML consumes them through
+    DynamicResource so the change reaches elements that are already on screen.
+
+    The values here are the Classic defaults, so the app still looks right if a
+    resource dictionary is loaded without ThemeManager having run (designer, smoke test).
+  -->
+  <CornerRadius x:Key="FrameCornerRadius">12</CornerRadius>
+  <CornerRadius x:Key="FrameHeaderCornerRadius">12,12,0,0</CornerRadius>
+  <CornerRadius x:Key="FrameFooterCornerRadius">0,0,12,12</CornerRadius>
+  <CornerRadius x:Key="RowCornerRadius">7</CornerRadius>
+  <Thickness x:Key="FrameBorderThickness">1</Thickness>
+
+  <!-- Text input surfaces, rewritten per style by ThemeManager. -->
+  <SolidColorBrush x:Key="InputBackgroundBrush" Color="#18FFFFFF" po:Freeze="False" />
+  <SolidColorBrush x:Key="InputBorderBrush" Color="#30000000" po:Freeze="False" />
+
+  <!--
+    ============================================================================
     Text styles
     ============================================================================
 
@@ -202,12 +225,123 @@
 
   <Style TargetType="TextBox">
     <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
-    <Setter Property="Background" Value="#18FFFFFF" />
-    <Setter Property="BorderBrush" Value="#30000000" />
+    <Setter Property="Background" Value="{DynamicResource InputBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource InputBorderBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CaretBrush" Value="{DynamicResource PrimaryTextBrush}" />
     <Setter Property="SelectionBrush" Value="{DynamicResource SelectedBrush}" />
     <Setter Property="FontSize" Value="{DynamicResource CaptionFontSize}" />
+    <!--
+      A template is required, not cosmetic: the stock WPF text box draws its own light
+      surface, so on a dark panel the search box stayed bright white no matter what
+      Background was set to. PART_ContentHost is the part the control fills itself.
+    -->
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="TextBox">
+          <Border x:Name="InputChrome"
+                  Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="{DynamicResource RowCornerRadius}"
+                  Padding="{TemplateBinding Padding}">
+            <ScrollViewer x:Name="PART_ContentHost"
+                          VerticalAlignment="Center"
+                          HorizontalScrollBarVisibility="Hidden"
+                          VerticalScrollBarVisibility="Hidden" />
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!--
+    ComboBox: templated because the stock template paints a light box on every theme,
+    which on a dark panel is the brightest thing on screen. Kept deliberately small -
+    a drop-down with a label, a chevron and a popup.
+  -->
+  <Style TargetType="ComboBoxItem">
+    <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+    <Setter Property="Padding" Value="10,5" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ComboBoxItem">
+          <Border x:Name="ItemChrome"
+                  Background="Transparent"
+                  CornerRadius="4"
+                  Padding="{TemplateBinding Padding}">
+            <ContentPresenter />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsHighlighted" Value="True">
+              <Setter TargetName="ItemChrome" Property="Background" Value="{DynamicResource HoverBrush}" />
+            </Trigger>
+            <Trigger Property="IsSelected" Value="True">
+              <Setter TargetName="ItemChrome" Property="Background" Value="{DynamicResource SelectedBrush}" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style TargetType="ComboBox">
+    <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+    <Setter Property="Background" Value="{DynamicResource InputBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource InputBorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="FontSize" Value="{DynamicResource CaptionFontSize}" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ComboBox">
+          <Grid>
+            <ToggleButton x:Name="ToggleButton"
+                          Focusable="False"
+                          ClickMode="Press"
+                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+              <ToggleButton.Template>
+                <ControlTemplate TargetType="ToggleButton">
+                  <Border Background="{Binding Background, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                          BorderBrush="{Binding BorderBrush, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                          BorderThickness="{Binding BorderThickness, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                          CornerRadius="{DynamicResource RowCornerRadius}">
+                    <Grid>
+                      <ContentPresenter Margin="10,4,26,4"
+                                        HorizontalAlignment="Left"
+                                        VerticalAlignment="Center"
+                                        Content="{Binding SelectionBoxItem, RelativeSource={RelativeSource AncestorType=ComboBox}}" />
+                      <Path HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            Margin="0,0,11,0"
+                            Data="M 0 0 L 4 4 L 8 0"
+                            Stroke="{DynamicResource SecondaryTextBrush}"
+                            StrokeThickness="1.4" />
+                    </Grid>
+                  </Border>
+                </ControlTemplate>
+              </ToggleButton.Template>
+            </ToggleButton>
+
+            <Popup x:Name="PART_Popup"
+                   AllowsTransparency="True"
+                   Placement="Bottom"
+                   Focusable="False"
+                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                   StaysOpen="False">
+              <Border Background="{DynamicResource DialogSurfaceBrush}"
+                      BorderBrush="{DynamicResource InputBorderBrush}"
+                      BorderThickness="1"
+                      CornerRadius="6"
+                      Padding="4"
+                      MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                      Margin="0,2,0,0">
+                <StackPanel IsItemsHost="True" />
+              </Border>
+            </Popup>
+          </Grid>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
   </Style>
 
 </ResourceDictionary>

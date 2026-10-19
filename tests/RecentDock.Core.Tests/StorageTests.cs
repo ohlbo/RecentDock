@@ -237,10 +237,35 @@ public sealed class StorageTests : IDisposable
         MruRank = 3,
     };
 
+    // ------------------------------------------------------------ theme style
+
+    [Fact]
+    public void ThemeStyle_DefaultsToClassic()
+    {
+        // An upgrade must not restyle anyone: the appearance every earlier version
+        // shipped is the default, and only an explicit choice moves away from it.
+        Assert.Equal(ThemeStyleKind.Classic, new UiSettings().ThemeStyle);
+    }
+
+    [Fact]
+    public void Sanitize_UnknownThemeStyle_FallsBackToClassic()
+    {
+        var settings = new UiSettings { ThemeStyle = (ThemeStyleKind)99 };
+
+        Assert.Equal(ThemeStyleKind.Classic, settings.Sanitized(0, 0, 1920, 1080).ThemeStyle);
+    }
+
+    [Fact]
+    public void ThemeStyle_SurvivesAConfigRoundTrip()
+    {
+        Assert.True(ConfigStore.Save(new UiSettings { ThemeStyle = ThemeStyleKind.Glass }));
+
+        Assert.Equal(ThemeStyleKind.Glass, ConfigStore.Load().ThemeStyle);
+    }
+
     [Fact]
     public void Snapshot_RoundTripsItems()
-    {
-        var items = new[] { Item("a.pdf"), Item("folder", isDirectory: true) };
+    {        var items = new[] { Item("a.pdf"), Item("folder", isDirectory: true) };
 
         Assert.True(SnapshotStore.Save(items));
         ScanSnapshot? loaded = SnapshotStore.Load();

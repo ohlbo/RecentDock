@@ -90,6 +90,37 @@ public enum BackdropMaterialKind
     Acrylic = 1,
 }
 
+/// <summary>
+/// Visual style of the panel.
+///
+/// Orthogonal to <see cref="UiSettings.UseDarkTheme"/>: every style has a light and a
+/// dark variant. The style decides the CHARACTER - translucency, corner geometry,
+/// accent colour, shadow - not the lightness.
+/// </summary>
+public enum ThemeStyleKind
+{
+    /// <summary>
+    /// White glass, the appearance shipped up to v0.5.2. Kept as the default and
+    /// reproduced exactly: an update must not silently restyle someone who never
+    /// opened the settings window.
+    /// </summary>
+    Classic = 0,
+
+    /// <summary>
+    /// Heavier glass: more of the desktop reads through, larger corner radii and a
+    /// coloured edge, so the panel looks like a sheet of glass rather than a white
+    /// card.
+    /// </summary>
+    Glass = 1,
+
+    /// <summary>
+    /// Flat: opaque surfaces, small radii, hairline borders, no shadow. Gives up
+    /// transparency on purpose - on a busy wallpaper the crisp edges are what keeps a
+    /// long list readable.
+    /// </summary>
+    Flat = 2,
+}
+
 /// <summary>User-facing settings that survive a restart.</summary>
 public sealed record UiSettings
 {
@@ -141,6 +172,14 @@ public sealed record UiSettings
     /// runtime resource swapping.
     /// </summary>
     public bool UseDarkTheme { get; init; }
+
+    /// <summary>
+    /// Which visual style the panel uses. See <see cref="ThemeStyleKind"/>.
+    ///
+    /// Defaults to <see cref="ThemeStyleKind.Classic"/>, which is the appearance every
+    /// earlier version shipped, so an upgrade does not change how the panel looks.
+    /// </summary>
+    public ThemeStyleKind ThemeStyle { get; init; } = ThemeStyleKind.Classic;
 
     /// <summary>
     /// Panel opacity, 0.3 to 1.0. 1.0 is fully opaque; lower values let more of the
@@ -301,6 +340,11 @@ public sealed record UiSettings
             PanelOpacity = Math.Clamp(PanelOpacity, 0.3, 1.0),
             FontSize = Math.Clamp(FontSize, 10, 24),
             IconSize = Math.Clamp(IconSize, 12, 48),
+
+            // An unknown enum value can only come from a hand-edited file (or a file
+            // written by a newer build). Falling back to Classic is safe and keeps the
+            // panel readable instead of leaving every brush unpainted.
+            ThemeStyle = Enum.IsDefined(ThemeStyle) ? ThemeStyle : ThemeStyleKind.Classic,
         };
     }
 }

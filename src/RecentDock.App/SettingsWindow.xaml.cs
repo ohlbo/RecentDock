@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Controls;
 using RecentDock.Core.Storage;
 
 namespace RecentDock.App;
@@ -36,6 +37,7 @@ public partial class SettingsWindow : Window
 
         InitializeComponent();
 
+        StyleComboBox.SelectedIndex = (int)current.ThemeStyle;
         OpacitySlider.Value = current.PanelOpacity;
         FontSlider.Value = current.FontSize;
         IconSlider.Value = current.IconSize;
@@ -68,6 +70,21 @@ public partial class SettingsWindow : Window
         }
 
         UpdateValueLabels();
+        Publish();
+    }
+
+    /// <summary>
+    /// Style change. The style decides whether the panel is translucent at all, so the
+    /// opacity slider is disabled for the opaque style rather than left to do nothing.
+    /// </summary>
+    private void OnStyleChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        UpdateOpacityAvailability();
         Publish();
     }
 
@@ -166,6 +183,7 @@ public partial class SettingsWindow : Window
     {
         Result = _current with
         {
+            ThemeStyle = SelectedStyle,
             PanelOpacity = Math.Round(OpacitySlider.Value, 2),
             FontSize = Math.Round(FontSlider.Value),
             IconSize = Math.Round(IconSlider.Value),
@@ -179,10 +197,33 @@ public partial class SettingsWindow : Window
         SettingsChanged?.Invoke(this, Result);
     }
 
+    /// <summary>Currently selected style, tolerant of a not-yet-seeded combo box.</summary>
+    private ThemeStyleKind SelectedStyle => StyleComboBox.SelectedIndex switch
+    {
+        1 => ThemeStyleKind.Glass,
+        2 => ThemeStyleKind.Flat,
+        _ => ThemeStyleKind.Classic,
+    };
+
+    /// <summary>
+    /// The opacity slider has no effect on an opaque style, so it is disabled there
+    /// rather than left draggable and doing nothing.
+    /// </summary>
+    private void UpdateOpacityAvailability()
+    {
+        bool translucent = SelectedStyle != ThemeStyleKind.Flat;
+
+        OpacitySlider.IsEnabled = translucent;
+        OpacityValueText.Text = translucent ? $"{OpacitySlider.Value * 100:F0}%" : "不透明";
+        OpacityHintText.Text = translucent
+            ? "向左更透（更能看到桌面），向右更实（文字更清楚）"
+            : "扁平风格固定为不透明；切换回经典或玻璃可重新调整透明度";
+    }
+
     private void UpdateValueLabels()
     {
         // Shown as a percentage because "0.7" means nothing to most users.
-        OpacityValueText.Text = $"{OpacitySlider.Value * 100:F0}%";
+        UpdateOpacityAvailability();
         FontValueText.Text = $"{FontSlider.Value:F0} px";
         IconValueText.Text = $"{IconSlider.Value:F0} px";
     }
@@ -194,6 +235,7 @@ public partial class SettingsWindow : Window
         var defaults = new UiSettings();
 
         _loading = true;
+        StyleComboBox.SelectedIndex = (int)defaults.ThemeStyle;
         OpacitySlider.Value = defaults.PanelOpacity;
         FontSlider.Value = defaults.FontSize;
         IconSlider.Value = defaults.IconSize;

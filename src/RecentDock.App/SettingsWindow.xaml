@@ -47,6 +47,7 @@
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
     <TextBlock Grid.Row="0"
@@ -54,8 +55,28 @@
                Style="{DynamicResource TitleTextStyle}"
                Margin="0,0,0,18" />
 
-    <!-- ============================ opacity -->
+    <!-- ============================ theme style -->
     <Grid Grid.Row="1" Margin="0,0,0,18">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <TextBlock Grid.Row="0" Text="主题风格" />
+      <ComboBox Grid.Row="1"
+                x:Name="StyleComboBox"
+                Margin="0,6,0,0"
+                Padding="8,4"
+                Cursor="Hand"
+                SelectionChanged="OnStyleChanged">
+        <ComboBoxItem Content="经典（默认）· 白色玻璃" />
+        <ComboBoxItem Content="玻璃 · 更通透、大圆角、紫色描边" />
+        <ComboBoxItem Content="扁平 · 不透明、小直角、无阴影" />
+      </ComboBox>
+    </Grid>
+
+    <!-- ============================ opacity -->
+    <Grid Grid.Row="2" Margin="0,0,0,18">
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto" />
         <RowDefinition Height="Auto" />
@@ -90,6 +111,7 @@
 
       <!-- Never let a label intercept input meant for the control beneath it. -->
       <TextBlock Grid.Row="2" Grid.ColumnSpan="2"
+                 x:Name="OpacityHintText"
                  Text="向左更透（更能看到桌面），向右更实（文字更清楚）"
                  Style="{DynamicResource CaptionTextStyle}"
                  IsHitTestVisible="False"
@@ -97,7 +119,7 @@
     </Grid>
 
     <!-- ============================ font size -->
-    <Grid Grid.Row="2" Margin="0,0,0,18">
+    <Grid Grid.Row="3" Margin="0,0,0,18">
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto" />
         <RowDefinition Height="Auto" />
@@ -123,7 +145,7 @@
     </Grid>
 
     <!-- ============================ icon size -->
-    <Grid Grid.Row="3" Margin="0,0,0,18">
+    <Grid Grid.Row="4" Margin="0,0,0,18">
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto" />
         <RowDefinition Height="Auto" />
@@ -149,7 +171,7 @@
     </Grid>
 
     <!-- ============================ file path -->
-    <CheckBox Grid.Row="4"
+    <CheckBox Grid.Row="5"
               x:Name="ShowPathCheckBox"
               Content="显示文件地址"
               Margin="0,0,0,18"
@@ -158,7 +180,7 @@
               Unchecked="OnShowPathChanged" />
 
     <!-- ============================ window behaviour -->
-    <CheckBox Grid.Row="5"
+    <CheckBox Grid.Row="6"
               x:Name="AlwaysOnTopCheckBox"
               Content="保持置顶（不被其他窗口遮挡）"
               Margin="0,0,0,12"
@@ -166,7 +188,7 @@
               Checked="OnAlwaysOnTopChanged"
               Unchecked="OnAlwaysOnTopChanged" />
 
-    <CheckBox Grid.Row="6"
+    <CheckBox Grid.Row="7"
               x:Name="EdgeSnapCheckBox"
               Content="靠近屏幕边缘时自动吸附"
               Margin="0,0,0,12"
@@ -174,7 +196,7 @@
               Checked="OnEdgeBehaviorChanged"
               Unchecked="OnEdgeBehaviorChanged" />
 
-    <CheckBox Grid.Row="7"
+    <CheckBox Grid.Row="8"
               x:Name="EdgeAutoHideCheckBox"
               Content="吸附后自动隐藏（移入边缘恢复）"
               Margin="0,0,0,12"
@@ -182,7 +204,7 @@
               Checked="OnEdgeBehaviorChanged"
               Unchecked="OnEdgeBehaviorChanged" />
 
-    <CheckBox Grid.Row="8"
+    <CheckBox Grid.Row="9"
               x:Name="AutoStartCheckBox"
               Content="开机自启动"
               Margin="0,0,0,18"
@@ -191,7 +213,7 @@
               Unchecked="OnAutoStartChanged" />
 
     <!-- ============================ live preview hint -->
-    <Border Grid.Row="9"
+    <Border Grid.Row="10"
             Background="#14000000"
             CornerRadius="8"
             Padding="12,10"
@@ -202,7 +224,7 @@
     </Border>
 
     <!-- ============================ actions -->
-    <StackPanel Grid.Row="10" Orientation="Horizontal" HorizontalAlignment="Right">
+    <StackPanel Grid.Row="11" Orientation="Horizontal" HorizontalAlignment="Right">
       <Button Content="恢复默认" Click="OnResetClick" Padding="14,5" Margin="0,0,8,0" Cursor="Hand" />
       <Button Content="关闭" Click="OnCloseClick" Padding="18,5" Cursor="Hand" IsDefault="True" />
     </StackPanel>
